@@ -1,0 +1,40 @@
+# Projet de Classification de Produits E-commerce
+# Installation : pip install -r requirements.txt
+
+# Manipulation et analyse de données
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Visualisation
+matplotlib>=3.7.0
+seaborn>=0.12.0
+plotly>=5.14.0
+wordcloud>=1.9.0
+
+# Machine Learning
+scikit-learn>=1.3.0
+imbalanced-learn>=0.11.0
+
+# Natural Language Processing
+nltk>=3.8.0
+spacy>=3.5.0
+beautifulsoup4>=4.12.0
+lxml>=4.9.0
+
+# Utilitaires
+python-dotenv>=1.0.0
+tqdm>=4.65.0
+jupyter>=1.0.0
+ipykernel>=6.23.0
+
+# Tests statistiques
+scipy>=1.10.0
+statsmodels>=0.14.0
+
+# Gestion de fichiers Excel (pour le template)
+openpyxl>=3.1.0
+xlrd>=2.0.0
+
+# Autres utilitaires
+requests>=2.31.0
+
