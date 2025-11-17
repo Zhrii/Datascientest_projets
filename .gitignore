@@ -55,7 +55,6 @@ data/features/
 *.xlsx
 *.xls
 # Exceptions : garder les templates
-!Template/*.xlsx
 !rendu textuel/*.xlsx
 
 # Modèles et outputs

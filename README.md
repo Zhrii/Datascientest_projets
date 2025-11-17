@@ -95,36 +95,42 @@ Prendre en main et découvrir votre jeu de données et faire une analyse presque
 ## 📝 Structure du Projet
 
 ```
-Projet ecole/
+Datascientest_projets/
 │
 ├── data brut/              # Données brutes (ne pas modifier)
 │   ├── X_train_update.csv
 │   ├── X_test_update.csv
-│   └── Y_train.csv
+│   ├── Y_train.csv
+│   └── README.md
 │
-├── developpement/          # Fichiers de développement
-│   ├── requirements.txt
-│   ├── env.example
-│   └── .gitignore
+├── data/                   # Données traitées
+│   └── processed/         # Datasets nettoyés
+│       ├── X_train_clean.csv
+│       ├── X_test_clean.csv
+│       └── y_train.csv
 │
-├── template/               # Template Excel original
+├── notebooks/              # Notebooks d'analyse
+│   ├── 01_exploration_data.ipynb
+│   └── 02_preprocessing.ipynb
+│
+├── src/                    # Code source modulaire
+│   ├── preprocessing/      # Modules de preprocessing
+│   │   ├── html_cleaner.py
+│   │   ├── text_normalizer.py
+│   │   ├── feature_engineering.py
+│   │   └── pipeline.py
+│   └── utils/             # Utilitaires
+│       └── data_loader.py
+│
+├── rendu textuel/          # Rapports et documentation
+│   ├── RAPPORT_COMPLET_ETAPE_1_ET_2.md  # Rapport principal
 │   └── Template - Rapport exploration des données.xlsx
 │
-├── rendu textuel/          # Rendu et rapports
-│   ├── 01_contexte_et_perimetre.md
-│   ├── 02_visualisations_et_analyses.md
-│   └── Template - Rapport exploration des données.xlsx
 │
-├── notebooks/              # Notebooks d'exploration
-│   └── 01_exploration_data.ipynb
-│
-├── src/                    # Code source (pour étapes suivantes)
-│   └── (à créer)
-│
-├── reports/                # Rapports et visualisations (à créer)
-│   └── (à créer)
-│
-└── README.md              # Ce fichier
+├── class_identification.md # Description des 27 classes
+├── requirements.txt        # Dépendances Python
+├── .gitignore
+└── README.md
 ```
 
 ---
@@ -170,7 +176,7 @@ source venv/bin/activate
 #### 3. Installer les dépendances
 
 ```bash
-pip install -r developpement/requirements.txt
+pip install -r requirements.txt
 ```
 
 **Alternative :** Si vous préférez installer manuellement les packages essentiels :
@@ -178,20 +184,7 @@ pip install -r developpement/requirements.txt
 pip install pandas numpy matplotlib seaborn plotly wordcloud scikit-learn jupyter openpyxl
 ```
 
-#### 4. Configurer l'environnement (optionnel)
-
-Copier le fichier d'exemple et le personnaliser :
-```bash
-# Sur Windows (PowerShell)
-Copy-Item developpement\env.example developpement\.env
-
-# Sur Linux/Mac
-cp developpement/env.example developpement/.env
-```
-
-Puis éditer `developpement/.env` avec vos paramètres si nécessaire.
-
-#### 5. Vérifier l'installation
+#### 4. Vérifier l'installation
 
 ```bash
 python -c "import pandas; import numpy; import matplotlib; print('✅ Installation réussie !')"
@@ -242,7 +235,7 @@ python scripts/analyse.py
 #### Mettre à jour les dépendances
 
 ```bash
-pip install --upgrade -r developpement/requirements.txt
+pip install --upgrade -r requirements.txt
 ```
 
 #### Vérifier les versions installées
@@ -270,7 +263,7 @@ rm -rf venv
 # Recréer et réinstaller
 python -m venv venv
 source venv/bin/activate  # ou .\venv\Scripts\Activate.ps1 sur Windows
-pip install -r developpement/requirements.txt
+pip install -r requirements.txt
 ```
 
 ### Structure des Commandes par Étape
@@ -306,7 +299,7 @@ python src/train_model.py
 
 **Solution :**
 1. Vérifier que l'environnement virtuel est activé
-2. Réinstaller les dépendances : `pip install -r developpement/requirements.txt`
+2. Réinstaller les dépendances : `pip install -r requirements.txt`
 3. Vérifier que vous utilisez le bon kernel dans Jupyter
 
 #### Problème : Le kernel Jupyter ne trouve pas les packages
@@ -330,7 +323,7 @@ python -m ipykernel install --user --name=projet_ecole
 
 ### Liste Complète des Dépendances
 
-Les dépendances principales sont listées dans `developpement/requirements.txt` :
+Les dépendances principales sont listées dans `requirements.txt` :
 
 - **Pandas** : Manipulation de données
 - **NumPy** : Calculs numériques
