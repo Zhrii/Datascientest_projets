@@ -1,0 +1,90 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Environnement virtuel
+venv/
+env/
+ENV/
+.venv
+.venv/
+
+# Variables d'environnement
+.env
+.env.local
+developpement/.env
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+*.ipynb_checkpoints/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Données brutes (NE PAS COMMITER)
+data brut/*.csv
+data brut/*.xlsx
+data brut/*.xls
+
+# Données traitées
+data/processed/
+data/features/
+*.csv
+*.xlsx
+*.xls
+# Exceptions : garder les templates
+!Template/*.xlsx
+!rendu textuel/*.xlsx
+
+# Modèles et outputs
+*.pkl
+*.joblib
+*.h5
+*.pt
+*.pth
+*.sav
+models/
+output/
+checkpoints/
+
+# Logs
+logs/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Fichiers temporaires
+*.tmp
+*.temp
+temp/
+tmp/
+
+# Fichiers de sauvegarde
+*.bak
+*~
+

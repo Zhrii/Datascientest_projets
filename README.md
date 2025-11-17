@@ -28,6 +28,8 @@ Le projet se décompose en plusieurs étapes :
 
 Les données sont situées dans le dossier `data brut/` :
 
+> ⚠️ **Note importante** : Les fichiers de données (`*.csv`) ne sont **pas versionnés** dans Git pour des raisons de taille. Si vous clonez ce repository, vous devrez ajouter manuellement les fichiers de données dans le dossier `data brut/`. Voir `data brut/README.md` pour plus d'informations.
+
 ### Fichiers
 
 1. **`X_train_update.csv`** - Données d'entraînement
