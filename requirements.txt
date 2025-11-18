@@ -18,6 +18,12 @@ xgboost>=2.0.0
 lightgbm>=4.0.0
 catboost>=1.2.0
 
+# Deep Learning
+tensorflow>=2.13.0
+
+# Interprétabilité
+shap>=0.42.0
+
 # Natural Language Processing
 nltk>=3.8.0
 spacy>=3.5.0
