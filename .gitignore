@@ -43,19 +43,29 @@ developpement/.env
 *.swo
 *~
 
-# Données brutes (NE PAS COMMITER)
-data brut/*.csv
-data brut/*.xlsx
-data brut/*.xls
+# ========== Données (NE PAS COMMITER) ==========
+# Dossier data brut : tout ignorer sauf le README
+data brut/*
+!data brut/README.md
 
-# Données traitées
+# Dossiers de données traitées et images
 data/processed/
 data/features/
+
+# Fichiers de données (tous dossiers)
 *.csv
 *.xlsx
 *.xls
-# Exceptions : garder les templates
+# Exception : templates dans rendu textuel
 !rendu textuel/*.xlsx
+
+# Images dans les dossiers de données (volumineux)
+data brut/**/*.jpg
+data brut/**/*.jpeg
+data brut/**/*.png
+data/**/*.jpg
+data/**/*.jpeg
+data/**/*.png
 
 # Modèles et outputs
 *.pkl

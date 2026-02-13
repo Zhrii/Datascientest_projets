@@ -253,6 +253,8 @@ def train_neural_network(
     validation_data = (X_val, y_val) if X_val is not None else None
     
     print(f"🔄 Entraînement du modèle neural...")
+    import time
+    start_time = time.time()
     history = model.fit(
         X_train,
         y_train,
@@ -262,7 +264,8 @@ def train_neural_network(
         callbacks=callbacks_list,
         verbose=verbose
     )
-    
+    elapsed = time.time() - start_time
+    print(f"Temps d'entraînement : {elapsed} secondes")
     print(f"✅ Modèle neural entraîné avec succès")
     
     return {
