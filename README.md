@@ -2,93 +2,37 @@
 
 ## 📋 Contexte du Projet
 
-Ce projet consiste à développer un système de classification automatique de produits e-commerce. L'objectif est de prédire le **code de type de produit** (`prdtypecode`) à partir des informations textuelles disponibles (désignation et description).
+Ce projet développe un système de **classification automatique** et de **matching multimodale** pour un catalogue e-commerce. Il vise à :
+
+1. **Prédire le code type de produit** (`prdtypecode`, 27 classes) à partir du **texte** (désignation + description).
+2. **Associer textes et images** : recherche par similarité (texte → image, image → texte) via un modèle Dual Encoder entraîné sur les paires produit.
 
 ### Problématique
 
-Dans un contexte e-commerce, la classification automatique des produits est essentielle pour :
-- **Améliorer l'expérience utilisateur** : faciliter la navigation et la recherche de produits
-- **Optimiser la gestion du catalogue** : automatiser le catalogage et la catégorisation
-- **Améliorer les recommandations** : suggérer des produits similaires
-- **Réduire les erreurs humaines** : standardiser la classification
-
-### Périmètre du Projet
-
-Le projet se décompose en plusieurs étapes :
-1. **Exploration des données + DataViz** (Étape actuelle - Deadline : Vendredi 5 septembre)
-2. Préprocessing et nettoyage des données
-3. Feature engineering
-4. Modélisation et sélection de modèle
-5. Évaluation et optimisation
-6. Déploiement (si applicable)
+Dans un contexte e-commerce, ces outils permettent de :
+- **Améliorer l’expérience utilisateur** : navigation, recherche de produits
+- **Automatiser le catalogage** : catégorisation et cohérence texte/image
+- **Améliorer les recommandations** : produits similaires, recherche multimodale
+- **Réduire les erreurs** : standardisation et détection d’incohérences
 
 ---
 
-## 📊 Données Disponibles
+## 📊 Données
 
-Les données sont situées dans le dossier `data brut/` :
+Les données sont dans le dossier `data brut/` :
 
-> ⚠️ **Note importante** : Les fichiers de données (`*.csv`) ne sont **pas versionnés** dans Git pour des raisons de taille. Si vous clonez ce repository, vous devrez ajouter manuellement les fichiers de données dans le dossier `data brut/`. Voir `data brut/README.md` pour plus d'informations.
+> ⚠️ Les fichiers de données (`*.csv`, images) ne sont **pas versionnés** dans Git. Après clonage, placer les fichiers dans `data brut/` selon les instructions de `data brut/README.md`.
 
-### Fichiers
+### Fichiers principaux
 
-1. **`X_train_update.csv`** - Données d'entraînement
-   - **84 916 produits** avec leurs caractéristiques
-   - Colonnes :
-     - `designation` : Nom/titre du produit
-     - `description` : Description détaillée du produit (peut contenir du HTML)
-     - `productid` : Identifiant unique du produit
-     - `imageid` : Identifiant de l'image associée
+| Fichier | Description |
+|--------|-------------|
+| **X_train_update.csv** | ~84 916 produits : `designation`, `description`, `productid`, `imageid` |
+| **X_test_update.csv** | ~13 814 produits à classifier (même structure, sans labels) |
+| **Y_train.csv** | Labels `prdtypecode` pour l’entraînement |
 
-2. **`X_test_update.csv`** - Données de test
-   - **13 814 produits** à classifier
-   - Même structure que `X_train_update.csv`
-   - **Pas de labels** (à prédire)
-
-3. **`Y_train.csv`** - Labels d'entraînement
-   - **84 916 labels** correspondant aux produits d'entraînement
-   - Colonne : `prdtypecode` (code numérique du type de produit)
-   - **Variable cible à prédire**
-
-### Caractéristiques des Données
-
-- **Type de problème** : Classification multi-classes (classification supervisée)
-- **Variables textuelles** : `designation` et `description` (NLP)
-- **Variables numériques** : `productid`, `imageid` (identifiants)
-- **Variable cible** : `prdtypecode` (catégorie de produit)
-
----
-
-## 🎯 Objectifs de l'Étape 1
-
-**Deadline : Vendredi 5 septembre**
-
-Prendre en main et découvrir votre jeu de données et faire une analyse presque exhaustive de celui-ci afin de mettre en lumière :
-- La **structure** du dataset
-- Les **difficultés** rencontrées
-- Les **biais** éventuels
-
-### Livrables attendus
-
-- Exploration complète des données
-- Visualisations pertinentes (DataViz)
-- Identification des problèmes et biais
-- Rapport d'exploration avec insights clés
-- Recommandations pour les étapes suivantes
-
----
-
-## 🛠️ Outils Recommandés
-
-### Python
-- **Pandas** : manipulation et analyse des données
-- **NumPy** : calculs numériques
-- **Matplotlib / Seaborn** : visualisations
-- **WordCloud** : nuages de mots
-- **NLTK / spaCy** : traitement du langage naturel (pour analyses avancées)
-
-### Environnement
-- **Jupyter Notebook** ou **JupyterLab** : environnement interactif recommandé
+- **Classification** : objectif = prédire `prdtypecode` (multi-classes).
+- **Matching texte-image** : paires (texte, image) construites via `productid` / `imageid` ; images dans `data/processed/image_train/` (convention `image_{imageid}_product_{productid}.jpg`).
 
 ---
 
@@ -96,42 +40,36 @@ Prendre en main et découvrir votre jeu de données et faire une analyse presque
 
 ```
 Datascientest_projets/
-│
-├── data brut/              # Données brutes (ne pas modifier)
-│   ├── X_train_update.csv
-│   ├── X_test_update.csv
-│   ├── Y_train.csv
-│   └── README.md
-│
-├── data/                   # Données traitées
-│   └── processed/         # Datasets nettoyés
-│       ├── X_train_clean.csv
-│       ├── X_test_clean.csv
-│       └── y_train.csv
-│
-├── notebooks/              # Notebooks d'analyse
+├── data brut/              # Données brutes (CSV, non versionnées)
+├── data/processed/         # Données nettoyées + images (image_train/)
+├── notebooks/              # Analyse et entraînement
 │   ├── 01_exploration_data.ipynb
-│   └── 02_preprocessing.ipynb
-│
-├── src/                    # Code source modulaire
-│   ├── preprocessing/      # Modules de preprocessing
-│   │   ├── html_cleaner.py
-│   │   ├── text_normalizer.py
-│   │   ├── feature_engineering.py
-│   │   └── pipeline.py
-│   └── utils/             # Utilitaires
-│       └── data_loader.py
-│
-├── rendu textuel/          # Rapports et documentation
-│   ├── RAPPORT_COMPLET_ETAPE_1_ET_2.md  # Rapport principal
-│   └── Template - Rapport exploration des données.xlsx
-│
-│
-├── class_identification.md # Description des 27 classes
-├── requirements.txt        # Dépendances Python
-├── .gitignore
+│   ├── 02_preprocessing.ipynb
+│   ├── 03_modelisation_baseline.ipynb
+│   ├── 04_optimisation_modeles.ipynb
+│   ├── 05_modelisation_avancee.ipynb
+│   ├── 06_exploration_images_classic.ipynb
+│   ├── 07_matching_texte_image.ipynb
+│   └── 08_workbook_matching_texte_image.ipynb
+├── src/                    # Code modulaire
+│   ├── preprocessing/     # Nettoyage texte, pipeline
+│   ├── utils/              # Chargement données
+│   ├── modeling/           # Vectorisation, modèles baseline/avancés
+│   ├── evaluation/        # Métriques, rapports, matrices de confusion
+│   ├── optimization/      # Rééquilibrage, tuning
+│   ├── deep_learning/     # MLP, CNN, LSTM (TensorFlow/Keras)
+│   ├── interpretability/  # SHAP, feature importance
+│   └── multimodal/        # Matching texte-image (PyTorch)
+├── models/                 # Modèles sauvegardés, résultats (générés)
+├── rendu textuel/          # Rapports (exploration, préprocessing)
+├── class_identification.md
+├── PLAN_MATCHING_TEXTE_IMAGE.md   # Descriptif technique matching
+├── PROJET_STRUCTURE.md     # Vue détaillée de l’arborescence
+├── requirements.txt
 └── README.md
 ```
+
+Pour le détail des fichiers et des rôles par étape, voir **PROJET_STRUCTURE.md**.
 
 ---
 
@@ -139,257 +77,102 @@ Datascientest_projets/
 
 ### Prérequis
 
-- **Python 3.8+** (recommandé : Python 3.10 ou 3.11)
-- **pip** (gestionnaire de paquets Python)
-- **Git** (optionnel, pour le versioning)
+- **Python 3.8+** (recommandé : 3.10 ou 3.11)
+- **pip**
 
-### Installation des Dépendances
+### Installation
 
-#### 1. Cloner ou télécharger le projet
-
-Si vous utilisez Git :
 ```bash
+# Cloner le projet
 git clone <url-du-repo>
-cd "Projet ecole"
-```
+cd Datascientest_projets
 
-#### 2. Créer un environnement virtuel (recommandé)
-
-**Sur Windows (PowerShell) :**
-```powershell
+# Environnement virtuel (recommandé)
 python -m venv venv
+# Windows PowerShell :
 .\venv\Scripts\Activate.ps1
-```
-
-**Sur Windows (CMD) :**
-```cmd
-python -m venv venv
-venv\Scripts\activate.bat
-```
-
-**Sur Linux/Mac :**
-```bash
-python3 -m venv venv
+# Linux/Mac :
 source venv/bin/activate
-```
 
-#### 3. Installer les dépendances
-
-```bash
+# Dépendances
 pip install -r requirements.txt
 ```
 
-**Alternative :** Si vous préférez installer manuellement les packages essentiels :
-```bash
-pip install pandas numpy matplotlib seaborn plotly wordcloud scikit-learn jupyter openpyxl
-```
+### Lancer les notebooks
 
-#### 4. Vérifier l'installation
-
-```bash
-python -c "import pandas; import numpy; import matplotlib; print('✅ Installation réussie !')"
-```
-
-### Lancer le Projet
-
-#### Option 1 : Jupyter Notebook (recommandé pour l'exploration)
-
-1. **Démarrer Jupyter Notebook :**
 ```bash
 jupyter notebook
-```
-
-2. **Ou démarrer JupyterLab :**
-```bash
+# ou
 jupyter lab
 ```
 
-3. **Ouvrir le notebook d'exploration :**
-   - Naviguer vers le dossier `notebooks/`
-   - Ouvrir `01_exploration_data.ipynb`
-   - **Important :** Sélectionner le kernel Python correct (celui de votre environnement virtuel)
+Ouvrir les notebooks dans l’ordre souhaité depuis le dossier `notebooks/`. Choisir le **kernel** correspondant à l’environnement où `requirements.txt` a été installé.
 
-#### Option 2 : Créer un kernel Jupyter dédié (recommandé)
-
-Si vous avez des problèmes avec le kernel, créez un kernel dédié :
+**Créer un kernel dédié (optionnel) :**
 
 ```bash
-# Installer ipykernel si ce n'est pas déjà fait
 pip install ipykernel
-
-# Créer un kernel nommé "projet_ecole"
 python -m ipykernel install --user --name=projet_ecole --display-name "Python (projet_ecole)"
 ```
 
-Puis dans Jupyter, sélectionner le kernel "Python (projet_ecole)".
-
-#### Option 3 : Exécuter des scripts Python directement
-
-```bash
-# Exemple : exécuter un script d'analyse
-python scripts/analyse.py
-```
-
-### Commandes Utiles
-
-#### Mettre à jour les dépendances
-
-```bash
-pip install --upgrade -r requirements.txt
-```
-
-#### Vérifier les versions installées
-
-```bash
-pip list
-```
-
-#### Désactiver l'environnement virtuel
-
-```bash
-deactivate
-```
-
-#### Réinstaller depuis zéro
-
-```bash
-# Supprimer l'environnement virtuel
-# Sur Windows
-Remove-Item -Recurse -Force venv
-
-# Sur Linux/Mac
-rm -rf venv
-
-# Recréer et réinstaller
-python -m venv venv
-source venv/bin/activate  # ou .\venv\Scripts\Activate.ps1 sur Windows
-pip install -r requirements.txt
-```
-
-### Structure des Commandes par Étape
-
-#### Étape 1 : Exploration des données
-
-```bash
-# 1. Activer l'environnement virtuel
-.\venv\Scripts\Activate.ps1  # Windows PowerShell
-# ou
-source venv/bin/activate  # Linux/Mac
-
-# 2. Lancer Jupyter
-jupyter notebook
-
-# 3. Ouvrir notebooks/01_exploration_data.ipynb
-# 4. Exécuter toutes les cellules
-```
-
-#### Étape 2+ : Scripts de preprocessing (à venir)
-
-```bash
-# Exécuter un script de preprocessing
-python src/preprocessing.py
-
-# Exécuter un script de modélisation
-python src/train_model.py
-```
-
-### Dépannage
-
-#### Problème : `ModuleNotFoundError: No module named 'pandas'`
-
-**Solution :**
-1. Vérifier que l'environnement virtuel est activé
-2. Réinstaller les dépendances : `pip install -r requirements.txt`
-3. Vérifier que vous utilisez le bon kernel dans Jupyter
-
-#### Problème : Le kernel Jupyter ne trouve pas les packages
-
-**Solution :**
-```bash
-# Installer ipykernel dans l'environnement virtuel
-pip install ipykernel
-
-# Créer un nouveau kernel
-python -m ipykernel install --user --name=projet_ecole
-
-# Dans Jupyter, changer le kernel vers "projet_ecole"
-```
-
-#### Problème : Erreurs d'encodage (caractères spéciaux)
-
-**Solution :** Le projet utilise UTF-8. Si vous avez des problèmes :
-- Windows : Utiliser PowerShell plutôt que CMD
-- Vérifier que vos fichiers sont en UTF-8
-
-### Liste Complète des Dépendances
-
-Les dépendances principales sont listées dans `requirements.txt` :
-
-- **Pandas** : Manipulation de données
-- **NumPy** : Calculs numériques
-- **Matplotlib / Seaborn** : Visualisations
-- **Plotly** : Visualisations interactives
-- **WordCloud** : Nuages de mots
-- **Scikit-learn** : Machine Learning
-- **Jupyter** : Environnement interactif
-- **Openpyxl** : Lecture/écriture Excel
-- Et autres dépendances (voir `requirements.txt`)
+Puis dans Jupyter : *Kernel → Change kernel → Python (projet_ecole)*.
 
 ---
 
-## 🔍 Notions Clés
+## 📓 Parcours des Notebooks
 
-### Machine Learning
-- **Classification multi-classes** : comprendre les enjeux et métriques
-- **Déséquilibre de classes** : identifier si certaines catégories sont sous-représentées
-- **Validation croisée** : stratégies pour évaluer les modèles
+| Notebook | Contenu |
+|----------|--------|
+| **01** | Exploration des données texte, visualisations |
+| **02** | Préprocessing (HTML, normalisation), génération des jeux nettoyés |
+| **03** | Modélisation baseline (sklearn, CatBoost, etc.) |
+| **04** | Optimisation (poids de classes, SMOTE, etc.) |
+| **05** | Modèles avancés (ensembles, MLP/CNN/LSTM), interprétabilité (SHAP) |
+| **06** | Exploration et classification par images (CNN) |
+| **07** | **Matching texte-image** : Dual Encoder, loss contrastive, Recall@K |
+| **08** | Suivi des tâches du projet matching |
 
-### Natural Language Processing (NLP)
-- **Préprocessing de texte** : nettoyage, normalisation, tokenisation
-- **Feature extraction** : TF-IDF, word embeddings, etc.
-- **Classification textuelle** : approches traditionnelles vs deep learning
-
-### DataViz
-- **Visualisations adaptées** : choisir les bons graphiques selon les données
-- **Storytelling avec les données** : présenter les insights de manière claire
-
----
-
-## 📚 Ressources Utiles
-
-### Classification de texte
-- Scikit-learn : [Text classification guide](https://scikit-learn.org/stable/tutorial/text_analytics/working_with_text_data.html)
-- NLP avec Python : [Natural Language Processing with Python](https://www.nltk.org/book/)
-
-### DataViz
-- Matplotlib : [Gallery](https://matplotlib.org/stable/gallery/index.html)
-- Seaborn : [Tutorial](https://seaborn.pydata.org/tutorial.html)
-
-### E-commerce & Classification
-- Rechercher des cas d'usage similaires dans l'industrie
-- Étudier les défis spécifiques au e-commerce (multilingue, HTML, etc.)
+- **Classification (texte)** : enchaînement logique 01 → 02 → 03 → 04 → 05 (données dans `data/processed/`).
+- **Matching texte-image** : 07 (et 08 pour le suivi). Données : CSV dans `data brut/`, images dans `data/processed/image_train/`. Détails techniques dans **PLAN_MATCHING_TEXTE_IMAGE.md**.
 
 ---
 
-## ✅ Critères de Réussite - Étape 1
+## 🛠️ Dépendances principales
 
-- [ ] **Compréhension du contexte** : documentation claire du problème métier
-- [ ] **Exploration complète** : toutes les dimensions des données analysées
-- [ ] **Visualisations pertinentes** : au moins 5-7 visualisations significatives
-- [ ] **Insights identifiés** : défis et opportunités documentés
-- [ ] **Code propre** : notebook bien structuré et commenté
-- [ ] **Documentation** : rapport d'exploration avec conclusions
+- **Données & ML classique** : pandas, numpy, scikit-learn, xgboost, lightgbm, catboost
+- **Visualisation** : matplotlib, seaborn, plotly, wordcloud
+- **NLP** : nltk, spacy, beautifulsoup4
+- **Deep Learning (classification)** : TensorFlow
+- **Matching texte-image** : PyTorch, torchvision, sentence-transformers, Pillow
 
----
-
-## 🚀 Prochaines Étapes
-
-- **Étape 2** : Préprocessing et nettoyage des données textuelles
-- **Étape 3** : Feature engineering et vectorisation
-- **Étape 4** : Modélisation (modèles baselines puis optimisation)
-- **Étape 5** : Évaluation et métriques
-- **Étape 6** : Optimisation et fine-tuning
+Liste complète : `requirements.txt`.
 
 ---
 
-**Bonne exploration ! 🎉**
+## 📄 Documentation
+
+- **README.md** (ce fichier) : vue d’ensemble et démarrage.
+- **PROJET_STRUCTURE.md** : arborescence détaillée et fichiers par étape.
+- **PLAN_MATCHING_TEXTE_IMAGE.md** : objectifs, architecture Dual Encoder, choix des librairies, implémentation, métriques (Recall@K), pour le rendu matching.
+- **class_identification.md** : description des 27 classes (prdtypecode).
+- **rendu textuel/** : rapport exploration + préprocessing.
+
+---
+
+## 🔧 Dépannage
+
+- **ModuleNotFoundError** (ex. `torch`, `pandas`) : vérifier l’environnement activé et le kernel Jupyter, puis `pip install -r requirements.txt`.
+- **Données manquantes** : placer les CSV et, pour le matching, les images selon `data brut/README.md` et la convention des noms dans `data/processed/image_train/`.
+- **Encodage** : le projet suppose UTF-8 ; sous Windows, privilégier PowerShell.
+
+---
+
+## ✅ Livrables et critères
+
+- Exploration et préprocessing documentés (notebooks 01–02, rapport dans `rendu textuel/`).
+- Pipeline de classification texte (baseline → optimisation → modèles avancés) avec métriques et interprétabilité.
+- Module de matching texte-image (Dual Encoder, entraînement, évaluation Recall@K, sauvegarde du meilleur modèle) avec descriptif technique dans **PLAN_MATCHING_TEXTE_IMAGE.md**.
+
+---
+
+**Bonne exploration et bon entraînement ! 🎉**
