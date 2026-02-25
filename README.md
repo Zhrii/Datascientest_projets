@@ -43,14 +43,14 @@ Datascientest_projets/
 ├── data brut/              # Données brutes (CSV, non versionnées)
 ├── data/processed/         # Données nettoyées + images (image_train/)
 ├── notebooks/              # Analyse et entraînement
-│   ├── 01_exploration_data.ipynb
-│   ├── 02_preprocessing.ipynb
-│   ├── 03_modelisation_baseline.ipynb
-│   ├── 04_optimisation_modeles.ipynb
-│   ├── 05_modelisation_avancee.ipynb
-│   ├── 06_exploration_images_classic.ipynb
-│   ├── 07_matching_texte_image.ipynb
-│   └── 08_workbook_matching_texte_image.ipynb
+│   ├── 01_texte_exploration_donnees.ipynb   # Section texte : exploration
+│   ├── 02_texte_traitement_donnees.ipynb    # Section texte : preprocessing
+│   ├── 03_texte_resultats_traitement.ipynb  # Section texte : validation
+│   ├── 04_texte_modelisation_baseline.ipynb
+│   ├── 05_texte_optimisation_modeles.ipynb
+│   ├── 06_texte_modelisation_avancee.ipynb
+│   ├── 07_exploration_images_classic.ipynb
+│   └── 08_matching_texte_image.ipynb
 ├── src/                    # Code modulaire
 │   ├── preprocessing/     # Nettoyage texte, pipeline
 │   ├── utils/              # Chargement données

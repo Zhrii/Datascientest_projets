@@ -20,15 +20,15 @@ Datascientest_projets/
 │           └── image_{imageid}_product_{productid}.jpg
 │
 ├── 📓 notebooks/                    # Notebooks d'analyse
-│   ├── 01_exploration_data.ipynb     # Étape 1 : Exploration des données texte
-│   ├── 02_preprocessing.ipynb       # Étape 2 : Pre-processing
-│   ├── 03_modelisation_baseline.ipynb   # Modélisation baseline (sklearn, CatBoost, etc.)
-│   ├── 04_optimisation_modeles.ipynb    # Optimisation (poids, SMOTE, etc.)
-│   ├── 05_modelisation_avancee.ipynb    # Ensembles, Deep Learning (MLP, CNN, LSTM), interprétabilité
-│   ├── 06_exploration_images_classic.ipynb  # Exploration et classification par images (CNN)
-│   ├── 07_matching_texte_image.ipynb       # Matching texte-image (Dual Encoder, contrastive)
-│   ├── 08_workbook_matching_texte_image.ipynb  # Suivi des tâches matching
-│   └── catboost_info/              # Logs CatBoost (générés)
+│   ├── 01_texte_exploration_donnees.ipynb   # Section texte : exploration des données
+│   ├── 02_texte_traitement_donnees.ipynb    # Section texte : preprocessing pipeline
+│   ├── 03_texte_resultats_traitement.ipynb  # Section texte : validation et statistiques
+│   ├── 04_texte_modelisation_baseline.ipynb       # Texte : Modélisation baseline (sklearn, CatBoost, etc.)
+│   ├── 05_texte_optimisation_modeles.ipynb        # Texte : Optimisation (poids, SMOTE, etc.)
+│   ├── 06_texte_modelisation_avancee.ipynb        # Texte : Ensembles, Deep Learning (MLP, CNN, LSTM)
+│   ├── 07_exploration_images_classic.ipynb  # Exploration et classification par images (CNN)
+│   ├── 08_matching_texte_image.ipynb        # Matching texte-image (Dual Encoder, contrastive)
+│   └── catboost_info/                       # Logs CatBoost (générés)
 │
 ├── 💻 src/                          # Code source modulaire
 │   ├── preprocessing/               # Nettoyage et préparation du texte
@@ -89,38 +89,40 @@ Datascientest_projets/
 
 ## 🎯 Fichiers par étape
 
-### Exploration (Étape 1)
-- `notebooks/01_exploration_data.ipynb`
+### Section Texte : Exploration (Étape 1)
+- `notebooks/01_texte_exploration_donnees.ipynb`
 - `rendu textuel/RAPPORT_COMPLET_ETAPE_1_ET_2.md` (sections 1–4)
 
-### Pre-processing (Étape 2)
-- `notebooks/02_preprocessing.ipynb`
+### Section Texte : Traitement (Étape 2)
+- `notebooks/02_texte_traitement_donnees.ipynb`
 - `src/preprocessing/` (pipeline, nettoyage HTML, normalisation)
-- `data/processed/` (X_train_clean, X_test_clean, y_train)
 - `rendu textuel/RAPPORT_COMPLET_ETAPE_1_ET_2.md` (section 5)
 
+### Section Texte : Résultats du traitement (Étape 2b)
+- `notebooks/03_texte_resultats_traitement.ipynb`
+- `data/processed/` (X_train_clean, X_test_clean, y_train)
+
 ### Modélisation baseline (Étape 3)
-- `notebooks/03_modelisation_baseline.ipynb`
+- `notebooks/04_texte_modelisation_baseline.ipynb`
 - `src/modeling/` (vectorization, baseline_models)
 - `data/processed/*.csv`
 
 ### Optimisation
-- `notebooks/04_optimisation_modeles.ipynb`
+- `notebooks/05_texte_optimisation_modeles.ipynb`
 - `src/optimization/` (class_balancing, hyperparameter_tuning)
 
 ### Modélisation avancée
-- `notebooks/05_modelisation_avancee.ipynb`
+- `notebooks/06_texte_modelisation_avancee.ipynb`
 - `src/deep_learning/` (MLP, CNN, LSTM)
 - `src/interpretability/` (SHAP, feature importance)
 - `src/evaluation/` (métriques, rapports, matrices de confusion)
 - `models/` (résultats et modèles sauvegardés)
 
 ### Exploration images
-- `notebooks/06_exploration_images_classic.ipynb` (classification par CNN sur images)
+- `notebooks/07_exploration_images_classic.ipynb` (classification par CNN sur images)
 
 ### Matching texte-image
-- `notebooks/07_matching_texte_image.ipynb` (entraînement Dual Encoder)
-- `notebooks/08_workbook_matching_texte_image.ipynb` (suivi des tâches)
+- `notebooks/08_matching_texte_image.ipynb` (entraînement Dual Encoder)
 - `src/multimodal/` (data_loader, encoders, matching_model, utils)
 - `PLAN_MATCHING_TEXTE_IMAGE.md` (choix techniques et architecture)
 

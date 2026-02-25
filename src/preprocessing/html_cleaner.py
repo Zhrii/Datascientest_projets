@@ -8,6 +8,51 @@ import pandas as pd
 from bs4 import BeautifulSoup
 from typing import Optional
 
+# Patterns pour supprimer les balises HTML (normales et malformées)
+# 1. Balises reconnues : <tag>, </tag>, <tag /> avec espaces éventuels
+# 2. Fallback large : tout ce qui ressemble à <...>
+_HTML_TAG_STRICT = re.compile(
+    r'<\s*/?\s*[a-zA-Z][a-zA-Z0-9]*(?:\s+[^>]*)?\s*/?\s*>',
+    re.IGNORECASE
+)
+_HTML_TAG_FALLBACK = re.compile(r'<[^>]+>')
+
+
+def _normalize_angle_brackets(text: str) -> str:
+    """Remplace les caractères Unicode < > par leurs équivalents ASCII."""
+    return (text
+            .replace('\u3008', '<').replace('\u3009', '>')  # ＜ ＞
+            .replace('\u2039', '<').replace('\u203a', '>')  # ‹ ›
+            .replace('\u2329', '<').replace('\u232a', '>')  # ⟨ ⟩
+            )
+
+
+def remove_remaining_html(text: Optional[str]) -> str:
+    """
+    Supprime toutes les balises HTML restantes (passe de sécurité).
+    Utile après BeautifulSoup pour gérer le HTML malformé : < li>, <br/>, <. 4pc br>, etc.
+    """
+    if not text or pd.isna(text):
+        return ''
+    return _remove_all_html_tags(str(text))
+
+
+def _remove_all_html_tags(text: str, max_passes: int = 5) -> str:
+    """
+    Supprime toutes les balises HTML par passes successives.
+    Gère les variantes malformées : < li>, <br/>, <. 4pc br>, etc.
+    """
+    for _ in range(max_passes):
+        if not has_html(text):
+            break
+        # 1. Pattern strict (balises valides avec espaces)
+        text = _HTML_TAG_STRICT.sub(' ', text)
+        # 2. Fallback pour le reste (malformé)
+        text = _HTML_TAG_FALLBACK.sub(' ', text)
+        text = re.sub(r'\s+', ' ', text).strip()
+        text = decode_html_entities(text)
+    return text
+
 
 def has_html(text: Optional[str]) -> bool:
     """
@@ -76,6 +121,7 @@ def clean_html(text: Optional[str], preserve_structure: bool = True) -> str:
         return ''
     
     text = str(text)
+    text = _normalize_angle_brackets(text)
     
     # Si pas de HTML, retourner le texte tel quel
     if not has_html(text):
@@ -104,15 +150,14 @@ def clean_html(text: Optional[str], preserve_structure: bool = True) -> str:
         # Décoder les entités HTML restantes
         cleaned_text = decode_html_entities(cleaned_text)
         
+        # Passerelle regex : supprimer tout HTML restant (malformé, espaces, etc.)
+        cleaned_text = _remove_all_html_tags(cleaned_text)
+        
         return cleaned_text
         
-    except Exception as e:
-        # En cas d'erreur, utiliser une méthode regex simple
-        # Supprimer les balises HTML
-        cleaned_text = re.sub(r'<[^>]+>', ' ', text)
-        # Décoder les entités HTML
-        cleaned_text = decode_html_entities(cleaned_text)
-        # Nettoyer les espaces multiples
-        cleaned_text = re.sub(r'\s+', ' ', cleaned_text).strip()
+    except Exception:
+        # En cas d'erreur BeautifulSoup, utiliser la suppression regex
+        cleaned_text = decode_html_entities(text)
+        cleaned_text = _remove_all_html_tags(cleaned_text)
         return cleaned_text
 
