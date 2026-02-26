@@ -22,6 +22,20 @@ data brut/
 └── README.md (ce fichier)
 ```
 
+## Images (partie classification / matching)
+
+Pour les notebooks images (07, 08, etc.) et le matching texte-image, les images doivent être placées dans :
+
+```
+data/processed/image_train/
+```
+
+**Format des noms** : `image_{imageid}_product_{productid}.jpg`
+
+Exemple : `image_1263597046_product_3804725264.jpg`
+
+Sources possibles : archive fournie par Datascientest ou Challenge Data ENS.
+
 ## Note
 
 Si vous clonez ce repository, vous devrez ajouter manuellement ces fichiers de données dans ce dossier.
