@@ -26,8 +26,12 @@ Datascientest_projets/
 │   ├── 04_texte_modelisation_baseline.ipynb       # Texte : Modélisation baseline (sklearn, CatBoost, etc.)
 │   ├── 05_texte_optimisation_modeles.ipynb        # Texte : Optimisation (poids, SMOTE, etc.)
 │   ├── 06_texte_modelisation_avancee.ipynb        # Texte : Ensembles, Deep Learning (MLP, CNN, LSTM)
-│   ├── 07_exploration_images_classic.ipynb  # Exploration et classification par images (CNN)
-│   ├── 08_matching_texte_image.ipynb        # Matching texte-image (Dual Encoder, contrastive)
+│   ├── 07_image_exploration_donnees.ipynb   # Image : Exploration des données
+│   ├── 08_image_traitement_donnees.ipynb    # Image : Traitement, validation, préprocessing
+│   ├── 09_image_modelisation_baseline.ipynb # Image : Baseline (ResNet features + sklearn)
+│   ├── 10_image_optimisation_modeles.ipynb  # Image : Optimisation, XGBoost, LightGBM, CatBoost
+│   ├── 11_image_modelisation_avancee.ipynb  # Image : Ensembles (Voting, Stacking)
+│   ├── 12_matching_texte_image.ipynb        # Matching texte-image (Dual Encoder, contrastive)
 │   └── catboost_info/                       # Logs CatBoost (générés)
 │
 ├── 💻 src/                          # Code source modulaire
@@ -58,6 +62,10 @@ Datascientest_projets/
 │   ├── interpretability/            # Interprétabilité (SHAP, feature importance)
 │   │   ├── feature_importance.py
 │   │   ├── shap_analysis.py
+│   │   └── __init__.py
+│   ├── image/                      # Classification par images (ResNet features)
+│   │   ├── data_loader.py          # load_image_classification_data
+│   │   ├── feature_extractor.py    # ImageFeatureExtractor (ResNet50)
 │   │   └── __init__.py
 │   ├── multimodal/                 # Matching texte-image (PyTorch)
 │   │   ├── data_loader.py           # Paires (texte, image), load_image
@@ -118,11 +126,16 @@ Datascientest_projets/
 - `src/evaluation/` (métriques, rapports, matrices de confusion)
 - `models/` (résultats et modèles sauvegardés)
 
-### Exploration images
-- `notebooks/07_exploration_images_classic.ipynb` (classification par CNN sur images)
+### Exploration et classification images
+- `notebooks/07_image_exploration_donnees.ipynb` (exploration)
+- `notebooks/08_image_traitement_donnees.ipynb` (traitement, validation)
+- `notebooks/09_image_modelisation_baseline.ipynb` (features ResNet + sklearn)
+- `notebooks/10_image_optimisation_modeles.ipynb` (optimisation, boosting)
+- `notebooks/11_image_modelisation_avancee.ipynb` (ensembles)
+- `src/image/` (data_loader, feature_extractor)
 
 ### Matching texte-image
-- `notebooks/08_matching_texte_image.ipynb` (entraînement Dual Encoder)
+- `notebooks/12_matching_texte_image.ipynb` (entraînement Dual Encoder)
 - `src/multimodal/` (data_loader, encoders, matching_model, utils)
 - `PLAN_MATCHING_TEXTE_IMAGE.md` (choix techniques et architecture)
 

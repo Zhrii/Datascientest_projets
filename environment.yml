@@ -1,0 +1,15 @@
+# Environnement Conda pour le projet Classification Produits E-commerce
+# Création : conda env create -f environment.yml
+# Activation : conda activate datascientest_projet
+
+name: datascientest_projet
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - pip
+
+  # Pip packages (plus de contrôle sur les versions)
+  - pip:
+    - -r requirements.txt

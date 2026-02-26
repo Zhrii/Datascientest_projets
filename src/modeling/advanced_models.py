@@ -10,7 +10,7 @@ import warnings
 warnings.filterwarnings('ignore')
 
 # Modèles de base sklearn
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.ensemble import RandomForestClassifier, HistGradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.svm import LinearSVC
 
@@ -94,9 +94,9 @@ class AdvancedModels:
             n_jobs=-1
         )
         
-        # Gradient Boosting
-        self.models['Gradient Boosting'] = GradientBoostingClassifier(
-            n_estimators=100,
+        # Gradient Boosting (HistGradientBoosting = ~10x plus rapide, performances comparables)
+        self.models['Gradient Boosting'] = HistGradientBoostingClassifier(
+            max_iter=100,
             learning_rate=0.1,
             max_depth=5,
             random_state=self.random_state
@@ -148,6 +148,7 @@ class AdvancedModels:
                 depth=6,
                 learning_rate=0.1,
                 random_state=self.random_state,
+                thread_count=-1,  # Tous les cœurs CPU
                 verbose=False,
                 class_weights=class_weights
             )
@@ -176,7 +177,11 @@ class AdvancedModels:
         
         print(f"🔄 Entraînement de {model_name}...")
         model = self.models[model_name]
-        model.fit(X_train, y_train)
+        X_fit = X_train
+        # HistGradientBoostingClassifier requiert des données denses
+        if type(model).__name__ == 'HistGradientBoostingClassifier' and hasattr(X_train, 'toarray'):
+            X_fit = X_train.toarray()
+        model.fit(X_fit, y_train)
         self.trained_models[model_name] = model
         print(f"✅ {model_name} entraîné avec succès")
         return model
@@ -223,7 +228,9 @@ class AdvancedModels:
         """
         if model_name not in self.trained_models:
             raise ValueError(f"Modèle '{model_name}' non entraîné")
-        return self.trained_models[model_name].predict(X)
+        model = self.trained_models[model_name]
+        X_pred = X.toarray() if (type(model).__name__ == 'HistGradientBoostingClassifier' and hasattr(X, 'toarray')) else X
+        return model.predict(X_pred)
     
     def predict_proba(self, model_name: str, X: np.ndarray) -> np.ndarray:
         """
@@ -245,11 +252,12 @@ class AdvancedModels:
             raise ValueError(f"Modèle '{model_name}' non entraîné")
         
         model = self.trained_models[model_name]
+        X_pred = X.toarray() if (type(model).__name__ == 'HistGradientBoostingClassifier' and hasattr(X, 'toarray')) else X
         if hasattr(model, 'predict_proba'):
-            return model.predict_proba(X)
+            return model.predict_proba(X_pred)
         else:
             # Pour SVM, utiliser decision_function
-            decision = model.decision_function(X)
+            decision = model.decision_function(X_pred)
             exp_decision = np.exp(decision - np.max(decision, axis=1, keepdims=True))
             return exp_decision / np.sum(exp_decision, axis=1, keepdims=True)
     

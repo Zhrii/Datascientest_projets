@@ -102,8 +102,7 @@ def apply_smote(
     smote = SMOTE(
         sampling_strategy=sampling_strategy,
         random_state=random_state,
-        k_neighbors=k_neighbors,
-        n_jobs=-1
+        k_neighbors=k_neighbors
     )
     
     X_resampled, y_resampled = smote.fit_resample(X, y)
@@ -154,8 +153,7 @@ def apply_adasyn(
     adasyn = ADASYN(
         sampling_strategy=sampling_strategy,
         random_state=random_state,
-        n_neighbors=n_neighbors,
-        n_jobs=-1
+        n_neighbors=n_neighbors
     )
     
     X_resampled, y_resampled = adasyn.fit_resample(X, y)

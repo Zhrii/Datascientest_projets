@@ -82,11 +82,25 @@ Pour le détail des fichiers et des rôles par étape, voir **PROJET_STRUCTURE.m
 
 ### Installation
 
-```bash
-# Cloner le projet
-git clone <url-du-repo>
-cd Datascientest_projets
+**Option rapide (tout-en-un) :**
 
+```powershell
+# Windows PowerShell - configure tout automatiquement (venv + deps + spacy + nltk + kernel Jupyter)
+.\setup_env.ps1
+```
+
+**Avec Conda :**
+
+```bash
+conda env create -f environment.yml
+conda activate datascientest_projet
+python -m spacy download fr_core_news_sm
+python -m ipykernel install --user --name=datascientest_projet --display-name="Python (Datascientest Projet)"
+```
+
+**Installation manuelle :**
+
+```bash
 # Environnement virtuel (recommandé)
 python -m venv venv
 # Windows PowerShell :
@@ -96,6 +110,8 @@ source venv/bin/activate
 
 # Dépendances
 pip install -r requirements.txt
+python -m spacy download fr_core_news_sm
+python -m ipykernel install --user --name=datascientest_projet --display-name="Python (Datascientest Projet)"
 ```
 
 ### Lancer les notebooks

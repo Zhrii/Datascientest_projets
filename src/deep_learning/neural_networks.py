@@ -12,6 +12,11 @@ try:
     from tensorflow import keras
     from tensorflow.keras import layers, models, callbacks
     TENSORFLOW_AVAILABLE = True
+    # Maximiser l'utilisation CPU (threads intra/inter op)
+    import os
+    n_cores = os.cpu_count() or 4
+    tf.config.threading.set_intra_op_parallelism_threads(n_cores)
+    tf.config.threading.set_inter_op_parallelism_threads(n_cores)
 except ImportError:
     TENSORFLOW_AVAILABLE = False
     print("⚠️  TensorFlow n'est pas installé. Installez-le avec: pip install tensorflow")
