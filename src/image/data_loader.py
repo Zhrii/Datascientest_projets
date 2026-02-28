@@ -24,7 +24,7 @@ def load_image_classification_data(
     data_dir : Path
         Dossier contenant X_train_update.csv et Y_train.csv
     image_train_dir : Path
-        Dossier des images (noms : image_{imageid}_product_{productid}.jpg)
+        Dossier des images (noms : image_{imageid}_product_{productid}.[ext])
     root : Path, optional
         Racine du projet. Si fourni, les chemins d'images sont stockés en relatif.
 
@@ -42,11 +42,14 @@ def load_image_classification_data(
 
     # Construire la table des chemins d'images
     image_data = []
-    for f in image_train_dir.glob("*.jpg"):
+    image_exts = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
+    for f in image_train_dir.rglob("*"):
+        if not f.is_file() or f.suffix.lower() not in image_exts:
+            continue
         try:
             name = f.stem
             parts = name.split("_")
-            if len(parts) >= 4 and parts[0] == "image" and parts[2] == "product":
+            if len(parts) >= 4 and parts[0].lower() == "image" and parts[2].lower() == "product":
                 imageid = int(parts[1])
                 productid = int(parts[3])
                 if root_resolved is not None:
