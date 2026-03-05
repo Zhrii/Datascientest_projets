@@ -92,6 +92,13 @@ desktop.ini
 *.temp
 temp/
 tmp/
+_check_*.txt
+_fix_*.py
+_rewrite_*.py
+_cleanup_*.txt
+
+# CatBoost auto-generated logs
+**/catboost_info/
 
 # Fichiers de sauvegarde
 *.bak
