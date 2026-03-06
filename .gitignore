@@ -56,9 +56,6 @@ data/features/
 *.csv
 *.xlsx
 *.xls
-# Exception : templates dans rendu textuel
-!rendu textuel/*.xlsx
-
 # Images dans les dossiers de données (volumineux)
 data brut/**/*.jpg
 data brut/**/*.jpeg
@@ -87,7 +84,7 @@ logs/
 Thumbs.db
 desktop.ini
 
-# Fichiers temporaires
+# Fichiers temporaires et debug
 *.tmp
 *.temp
 temp/
@@ -96,6 +93,9 @@ _check_*.txt
 _fix_*.py
 _rewrite_*.py
 _cleanup_*.txt
+_debug_*.py
+_dump_*.py
+_dump_*_out.txt
 
 # CatBoost auto-generated logs
 **/catboost_info/

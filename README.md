@@ -61,7 +61,11 @@ Datascientest_projets/
 │   ├── interpretability/  # SHAP, feature importance
 │   └── multimodal/        # Matching texte-image (PyTorch)
 ├── models/                 # Modèles sauvegardés, résultats (générés)
-├── rendu textuel/          # Rapports (exploration, préprocessing)
+├── rendus/                 # Rapports et documentation
+│   ├── reference_classes.md      # Référentiel des 27 classes (prdtypecode)
+│   ├── rapport_partie_texte.md   # Rapport classification textuelle
+│   ├── rapport_partie_image.md   # Rapport classification par images
+│   └── rapport_partie_fusion.md  # Rapport fusion multimodale
 ├── class_identification.md
 ├── PLAN_MATCHING_TEXTE_IMAGE.md   # Descriptif technique matching
 ├── PROJET_STRUCTURE.md     # Vue détaillée de l’arborescence
@@ -170,8 +174,11 @@ Liste complète : `requirements.txt`.
 - **README.md** (ce fichier) : vue d’ensemble et démarrage.
 - **PROJET_STRUCTURE.md** : arborescence détaillée et fichiers par étape.
 - **PLAN_MATCHING_TEXTE_IMAGE.md** : objectifs, architecture Dual Encoder, choix des librairies, implémentation, métriques (Recall@K), pour le rendu matching.
-- **class_identification.md** : description des 27 classes (prdtypecode).
-- **rendu textuel/** : rapport exploration + préprocessing.
+- **rendus/** : rapports et référentiels
+  - `reference_classes.md` : référentiel des 27 classes produits (prdtypecode)
+  - `rapport_partie_texte.md` : rapport classification textuelle
+  - `rapport_partie_image.md` : rapport classification par images
+  - `rapport_partie_fusion.md` : rapport fusion multimodale
 
 ---
 
@@ -185,7 +192,7 @@ Liste complète : `requirements.txt`.
 
 ## ✅ Livrables et critères
 
-- Exploration et préprocessing documentés (notebooks 01–02, rapport dans `rendu textuel/`).
+- Exploration et préprocessing documentés (notebooks 01–02, rapports dans `rendus/`).
 - Pipeline de classification texte (baseline → optimisation → modèles avancés) avec métriques et interprétabilité.
 - Module de matching texte-image (Dual Encoder, entraînement, évaluation Recall@K, sauvegarde du meilleur modèle) avec descriptif technique dans **PLAN_MATCHING_TEXTE_IMAGE.md**.
 

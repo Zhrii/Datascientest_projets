@@ -1,12 +1,25 @@
 # Référentiel des Classes Produits (prdtypecode)
 
+> **À l'attention des rédacteurs du rapport final** : ce document décrit les 27 catégories de produits du catalogue. Il sert de référence pour interpréter les résultats de classification (texte, image, fusion) et comprendre les confusions entre classes.
+
+---
+
 ## Vue d'ensemble
 
 Le dataset Rakuten contient **84 916 produits** répartis en **27 classes** identifiées par un code numérique (`prdtypecode`). Ces 27 classes peuvent être regroupées en **24 classes** via une superclasse qui fusionne les 4 catégories de publications.
 
+**Utilisation dans le projet** : chaque modèle (texte, image, fusion) prédit ce code à partir des données produit. La qualité de la prédiction est évaluée en comparant la classe prédite à la classe réelle (ground truth).
+
 ---
 
 ## Les 27 classes détaillées
+
+*Légende des colonnes :*
+- **Code** : identifiant numérique de la classe (`prdtypecode`).
+- **Catégorie** : nom métier de la classe.
+- **Effectif (texte)** : nombre de produits avec texte dans cette classe.
+- **Effectif (images nettoyées)** : nombre de produits avec une image valide dans cette classe (certaines images sont exclues lors du nettoyage).
+- **% du dataset** : proportion de la classe par rapport au total (84 916 produits texte).
 
 | Code | Catégorie | Effectif (texte) | Effectif (images nettoyées) | % du dataset |
 |------|-----------|------------------:|----------------------------:|-------------:|
@@ -220,12 +233,23 @@ Les 23 autres classes restent inchangées.
 
 ## Confusions fréquentes entre classes
 
-| Groupe de confusion | Classes concernées | Raison |
-|---|---|---|
-| **Publications** | 10, 2280, 2403, 2705 | Toutes des publications écrites, descriptions souvent absentes |
-| **Bébé / Puériculture** | 1301, 1320 | Accessoires vs mobilier bébé, vocabulaire proche |
-| **Jouets** | 1280, 1281 | Jouets classiques vs jeux éducatifs, frontière floue |
-| **Maison / Déco** | 1560, 2060 | Mobilier vs décoration/bricolage, produits similaires |
-| **Jardin** | 2582, 2583, 2585 | Jardin / piscine / outils extérieurs, univers commun |
-| **Gaming** | 40, 50, 60, 2462, 2905 | Jeux, consoles, accessoires, DLC — univers gaming |
-| **Figurines** | 1140, 1180 | Figurines collection vs figurines Warhammer |
+Ces groupes de classes sont régulièrement confondus par les modèles (texte et image). L’identification de ces confusions aide à interpréter les erreurs et à prioriser les améliorations.
+
+| Groupe de confusion | Classes concernées | Raison | Impact sur les modèles |
+|---|---|---|---|
+| **Publications** | 10, 2280, 2403, 2705 | Toutes des publications écrites, descriptions souvent absentes | Texte : peu de mots discriminants ; Image : couvertures similaires |
+| **Bébé / Puériculture** | 1301, 1320 | Accessoires vs mobilier bébé, vocabulaire proche | Les deux classes partagent des termes courants (bébé, puériculture) |
+| **Jouets** | 1280, 1281 | Jouets classiques vs jeux éducatifs, frontière floue | Distinction subjective (puzzle = jouet ou jeu éducatif ?) |
+| **Maison / Déco** | 1560, 2060 | Mobilier vs décoration/bricolage, produits similaires | Texte : HTML fréquent ; Image : meubles et luminaires visuellement proches |
+| **Jardin** | 2582, 2583, 2585 | Jardin / piscine / outils extérieurs, univers commun | Produits souvent vendus ensemble, contextes similaires |
+| **Gaming** | 40, 50, 60, 2462, 2905 | Jeux, consoles, accessoires, DLC — univers gaming | Vocabulaire commun (PS4, Xbox, jeu, etc.) |
+| **Figurines** | 1140, 1180 | Figurines collection vs figurines Warhammer | Visuellement et sémantiquement très proches |
+
+---
+
+## Synthèse pour le rapport final
+
+- **27 classes** : granularité fine, certaines classes très minoritaires (ex. 1180 Warhammer avec 764 produits).
+- **Déséquilibre** : ratio 13,4× entre la plus grande (Piscine 10 209) et la plus petite (Warhammer 764).
+- **Classes difficiles** : publications (descriptions absentes), DLC (images peu informatives), textiles (images similaires).
+- **Superclasse 24** : fusion des 4 classes publications en une seule ; améliore parfois légèrement les métriques en réduisant la complexité.

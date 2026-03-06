@@ -56,6 +56,9 @@ def load_text_image_pairs(
     X_train = pd.read_csv(data_dir / "X_train_update.csv", index_col=0)
     y_train = pd.read_csv(data_dir / "Y_train.csv", index_col=0)
 
+    # Joindre les labels AVANT le merge pour éviter les problèmes d'alignement d'index
+    X_train = X_train.join(y_train)
+
     # Construire la table des chemins d'images (relatifs à root si fourni)
     image_data = []
     for f in image_train_dir.glob("*.jpg"):
@@ -75,7 +78,6 @@ def load_text_image_pairs(
 
     image_df = pd.DataFrame(image_data)
     X_with_images = X_train.merge(image_df, on=["imageid", "productid"], how="inner")
-    y_aligned = y_train.loc[X_with_images.index]
 
     # Texte
     if preprocess_text:
@@ -95,7 +97,7 @@ def load_text_image_pairs(
         "image_path": X_with_images["image_path"].values,
         "productid": X_with_images["productid"].values,
         "imageid": X_with_images["imageid"].values,
-        "prdtypecode": y_aligned["prdtypecode"].values,
+        "prdtypecode": X_with_images["prdtypecode"].values,
     })
     return pairs_df
 
