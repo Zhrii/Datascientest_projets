@@ -71,9 +71,10 @@ data/**/*.png
 *.pt
 *.pth
 *.sav
-models/
 output/
 checkpoints/
+
+models/
 
 # Logs
 logs/
