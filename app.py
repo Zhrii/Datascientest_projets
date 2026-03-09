@@ -143,7 +143,7 @@ def load_image_pipeline():
 
 # MOTEUR MULTIMODAL : FONCTIONS DE CHARGEMENT
 
-@st.cache_resource(show_spinner="Chargement du cerveau CLIP...")
+@st.cache_resource(show_spinner="Chargement modèle...")
 def load_clip_engine():
     try:
         model, _, preprocess = open_clip.create_model_and_transforms('ViT-B-32', pretrained='laion2b_s34b_b79k')
