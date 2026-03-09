@@ -105,3 +105,6 @@ _dump_*_out.txt
 *.bak
 *~
 
+clip_features_cache.npz
+images/
+temp_image.jpg

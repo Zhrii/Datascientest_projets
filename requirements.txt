@@ -52,3 +52,8 @@ sentence-transformers>=2.2.0
 torch>=2.0.0
 torchvision>=0.15.0
 Pillow>=9.0.0
+
+# Application Web & Déploiement (Ajout Nicolas)
+streamlit>=1.30.0
+huggingface-hub>=0.20.0
+open_clip_torch>=2.20.0
