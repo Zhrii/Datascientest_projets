@@ -111,8 +111,11 @@ MODEL_TEXT_PATH = get_hf_model("svm_linear_baseline_27_classes_final.pkl")
 # Fichier IMAGE
 MODEL_IMAGE_PATH = get_hf_model("image_logistic_regression_27_classes_baseline.pkl")
 
-# Fichier MULTIMODAL
-CLIP_CACHE_PATH = Path("models/clip_features_cache_lite.npz")
+# Fichiers FUSION (TF-IDF + CLIP image + CLIP texte + SVM Linear)
+TFIDF_FUSION_PATH = MODELS_DIR / "tfidf_fusion.pkl"
+SVD_FUSION_PATH = MODELS_DIR / "svd_fusion.pkl"
+FUSION_SVM_PATH = MODELS_DIR / "fusion_svm.pkl"
+LABEL_ENCODER_FUSION_PATH = MODELS_DIR / "label_encoder_fusion.pkl"
 
 @st.cache_resource(show_spinner="Chargement de l'IA Texte...")
 def load_text_pipeline():
@@ -141,37 +144,43 @@ def load_image_pipeline():
         return None, f"Erreur d'importation : {e}"
 
 
-# MOTEUR MULTIMODAL : FONCTIONS DE CHARGEMENT
+# FUSION (TF-IDF + CLIP image + CLIP texte + SVM Linear) : FONCTIONS DE CHARGEMENT
 
-@st.cache_resource(show_spinner="Chargement modèle...")
-def load_clip_engine():
+@st.cache_resource(show_spinner="Chargement du modèle Fusion (TF-IDF + CLIP + SVM)...")
+def load_fusion_pipeline():
+    """Charge le pipeline Fusion : TF-IDF, SVD, CLIP, SVM Linear."""
+    if not all([
+        TFIDF_FUSION_PATH.exists(),
+        SVD_FUSION_PATH.exists(),
+        FUSION_SVM_PATH.exists(),
+        LABEL_ENCODER_FUSION_PATH.exists(),
+    ]):
+        return None, "Fichiers fusion manquants. Exécutez le notebook 12_multimodal_fusion jusqu'à la cellule d'export."
     try:
-        model, _, preprocess = open_clip.create_model_and_transforms('ViT-B-32', pretrained='laion2b_s34b_b79k')
-        model.eval() 
+        tfidf_fusion = TFIDFVectorizer.load(TFIDF_FUSION_PATH)
+        with open(SVD_FUSION_PATH, 'rb') as f:
+            svd_fusion = pickle.load(f)
+        with open(FUSION_SVM_PATH, 'rb') as f:
+            fusion_svm = pickle.load(f)
+        with open(LABEL_ENCODER_FUSION_PATH, 'rb') as f:
+            encoder_fusion = pickle.load(f)
+        # CLIP pour image et texte
+        model_clip, _, preprocess_clip = open_clip.create_model_and_transforms(
+            'ViT-B-32', pretrained='laion2b_s34b_b79k'
+        )
+        model_clip.eval()
         tokenizer = open_clip.get_tokenizer('ViT-B-32')
-        return model, tokenizer
+        return {
+            'tfidf': tfidf_fusion,
+            'svd': svd_fusion,
+            'svm': fusion_svm,
+            'encoder': encoder_fusion,
+            'clip_model': model_clip,
+            'clip_preprocess': preprocess_clip,
+            'clip_tokenizer': tokenizer,
+        }, None
     except Exception as e:
         return None, str(e)
-
-@st.cache_data(show_spinner="Chargement et vérification du catalogue...")
-def load_gallery_data():
-    if not CLIP_CACHE_PATH.exists():
-        return None, None
-    
-    cache = np.load(CLIP_CACHE_PATH)
-    keys = cache.files
-    gallery_embeddings = cache[keys[0]] if 'img_val' not in keys else cache['img_val']
-    
-    try:
-        val_df = pd.read_csv("val_df_multimodal_lite.csv")
-        # Sécurité
-        if len(val_df) != len(gallery_embeddings):
-            st.warning(f"Attention : L'IA a trouvé {len(gallery_embeddings)} images mais le CSV contient {len(val_df)} produits !")
-        return gallery_embeddings, val_df
-        
-    except Exception as e:
-        st.error(f"Erreur de lecture du CSV : {e}")
-        return None, None
 
 
 # 4. MENU LATÉRAL
@@ -401,64 +410,72 @@ elif page == "4. Assistant Image":
                     except Exception as e:
                         st.error(f"Erreur pendant l'analyse : {e}")
 
-# PAGE 5 : MOTEUR MULTIMODAL (Interface)
+# PAGE 5 : ASSISTANT FUSION (TF-IDF + CLIP image + CLIP texte + SVM Linear)
 
 elif page == "5. Moteur Multimodal":
-    st.title("Recherche Intelligente (Texte -> Image)")
-    st.markdown("Cet assistant le lien entre vos mots et les pixels de notre catalogue.")
+    st.title("Assistant Fusion : TF-IDF + CLIP image + CLIP texte + SVM Linear")
+    st.markdown("Le **3ᵉ modèle** combine texte et image pour une prédiction optimale (F1-macro 0,84). Saisissez la fiche produit et uploadez l'image.")
 
-    clip_model, tokenizer = load_clip_engine()
-    gallery_embeddings, df_gallery = load_gallery_data()
+    pipeline, err = load_fusion_pipeline()
 
-    if clip_model is None or gallery_embeddings is None:
-       st.warning("**Moteur inactif.** Vérifiez que le fichier `multimodal_clip_cache.npz` est dans `models/` et que vos dossiers `data brut` et `data` sont bien présents.")
+    if pipeline is None:
+        st.warning(f"**Modèle Fusion indisponible.** {err}")
     else:
-        search_query = st.text_input("Que recherchez-vous dans le catalogue Rakuten ?", placeholder="Ex: Une chaise scandinave en bois blanc...")
+        user_text = st.text_area("Fiche produit (Titre + Description) :", height=120, placeholder="Ex: Chaise scandinave en bois blanc, design nordique...")
+        uploaded_file = st.file_uploader("Image du produit (JPG/PNG)", type=["jpg", "jpeg", "png"])
 
-        if st.button("Chercher les produits", type="primary"):
-            if not search_query:
-                st.error("Veuillez entrer une description pour lancer la recherche.")
+        if st.button("Analyser (Texte + Image)", type="primary"):
+            if not user_text or uploaded_file is None:
+                st.error("Veuillez saisir le texte ET uploader une image.")
             else:
-                with st.spinner(f"Recherche de '{search_query}' parmi {len(df_gallery)} produits..."):
-                    
-                    # 1. Encodage du texte
-                    tokens = tokenizer([search_query])
-                    with torch.no_grad():
-                        text_features = clip_model.encode_text(tokens)
-                        
-                    # 2. Normalisation L2 
-                    text_features = text_features / text_features.norm(dim=-1, keepdim=True)
-                    text_features = text_features.cpu().numpy()
-                    
-                    # 3. Calcul de similarité 
-                    sims = (text_features @ gallery_embeddings.T).flatten()
-                    
-                    # 4. Top 3 des meilleurs matchs
-                    top3_indices = np.argsort(sims)[::-1][:3]
-                    
-                    st.success("Voici les produits les plus pertinents :")
-                    cols = st.columns(3)
-                    
-                    for i, col in enumerate(cols):
-                        best_idx = top3_indices[i]
-                        score = sims[best_idx] * 100
-                        
-                        # Récupération sécurisée du chemin de l'image
-                        image_path = df_gallery.iloc[best_idx]['image_path']
-                        code_categorie = df_gallery.iloc[best_idx]['prdtypecode']
-                        
-                        with col:
-                            full_path = Path(".") / image_path
-                            if full_path.exists():
-                                st.image(str(full_path), use_container_width=True)
-                            else:
-                                st.info(f"Image introuvable : {image_path}")
-                                
-                            st.caption(f"Match #{i+1} : {score:.1f}%")
-                            # On utilise la fonction .get() pour trouver le nom, sinon on affiche le code par défaut
-                            nom_categorie = DICT_CATEGORIES.get(code_categorie, f"Code {code_categorie}")
-                            # On affiche le nom
-                            st.caption(f"Catégorie : **{nom_categorie}**")
+                with st.spinner("Extraction des features et prédiction..."):
+                    try:
+                        # 1. Preprocessing du texte (comme en entraînement)
+                        from sklearn.preprocessing import normalize as sk_normalize
+                        try:
+                            from src.preprocessing.pipeline import PreprocessingPipeline
+                            pipe_pp = PreprocessingPipeline(combine_text=True, create_features=False)
+                            tmp = pd.DataFrame({'designation': [user_text], 'description': ['']})
+                            tmp = pipe_pp.fit_transform(tmp)
+                            text_preprocessed = tmp['text_combined'].iloc[0]
+                        except Exception:
+                            text_preprocessed = user_text.strip()
+                        text_series = pd.Series([text_preprocessed])
+                        X_tfidf = pipeline['tfidf'].transform(text_series)
+                        X_tfidf_svd = pipeline['svd'].transform(X_tfidf)
+                        X_tfidf_norm = sk_normalize(X_tfidf_svd)
+
+                        # 2. CLIP : image
+                        img = Image.open(uploaded_file).convert('RGB')
+                        img_tensor = pipeline['clip_preprocess'](img).unsqueeze(0)
+                        with torch.no_grad():
+                            clip_img = pipeline['clip_model'].encode_image(img_tensor)
+                        clip_img = clip_img / clip_img.norm(dim=-1, keepdim=True)
+                        clip_img = clip_img.cpu().numpy().astype(np.float32)
+
+                        # 3. CLIP : texte
+                        tokens = pipeline['clip_tokenizer']([text_preprocessed])
+                        with torch.no_grad():
+                            clip_txt = pipeline['clip_model'].encode_text(tokens)
+                        clip_txt = clip_txt / clip_txt.norm(dim=-1, keepdim=True)
+                        clip_txt = clip_txt.cpu().numpy().astype(np.float32)
+
+                        # 4. Concaténation [tfidf_300, clip_img_512, clip_txt_512] = 1324d
+                        X_fusion = np.hstack([X_tfidf_norm, clip_img, clip_txt])
+                        X_fusion = sk_normalize(X_fusion)
+
+                        # 5. Prédiction
+                        pred_code_interne = pipeline['svm'].predict(X_fusion)[0]
+                        code_rakuten = pipeline['encoder'].inverse_transform([pred_code_interne])[0]
+                        nom_categorie = DICT_CATEGORIES.get(int(code_rakuten), f"Code {code_rakuten}")
+
+                        st.success(f"Catégorie prédite : **{nom_categorie}**")
+                        st.caption(f"Code Rakuten : {code_rakuten}")
+
+                        if uploaded_file is not None:
+                            st.image(img, width=200, caption="Image analysée")
+                    except Exception as e:
+                        st.error(f"Erreur : {e}")
 
     # PAGE 6 : Resultats et conclusion
     
