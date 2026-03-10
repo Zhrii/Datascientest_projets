@@ -195,10 +195,12 @@ page = st.sidebar.radio(
     [
         "1. Accueil & Contexte",
         "2. Défis & Modélisation",
-        "3. Assistant Texte",
-        "4. Assistant Image",
-        "5. Moteur Multimodal",
-        "6. Résultats & Conclusion"
+        "3. Résultats",
+        "4. Assistant Texte",
+        "5. Assistant Image",
+        "6. Moteur Multimodal",
+        "7. Conclusion"
+
     ]
 )
 
@@ -308,10 +310,37 @@ elif page == "2. Défis & Modélisation":
         st.markdown("- **Matching :** Recall@10 de 69,1% via CLIP.")
         st.success("**Résultat final :** F1-Macro à 0,84 ! C'est le modèle recommandé à Rakuten.")
 
+# PAGE 3 : Resultats et conclusion
+    
+elif page == "3. Résultats":
+    st.title("Résultats")
 
-# PAGE 3 : ASSISTANT TEXTE
+    # --- PARTIE 1 : COMPARAISON ---
+    st.header("1. Comparaison des Performances")
+    st.write(
+        "L'objectif de cette étape était de comparer nos différentes approches sur une même métrique : "
+        "le **F1-Score Macro** (qui, contrairement à l'Accuracy, ne triche pas sur les classes minoritaires)."
+    )
 
-elif page == "3. Assistant Texte":
+    st.markdown("""
+    | Approche | Modèle | F1-Score (Macro) | Verdict |
+    | :--- | :--- | :--- | :--- |
+    | **Baseline Texte** | Naive Bayes / CatBoost | 0.65 - 0.68 | Rapide, mais manque de finesse. |
+    | **Champion Texte seul** | SVM Linéaire (TF-IDF) | 0.78 | Très robuste, notre référence texte. |
+    | **Baseline Image** | ResNet50 | 0.51 | Faible (trop d'ambiguïtés visuelles). |
+    | **Champion Image seul** | CLIP (ViT-B/32) | 0.66 | Capture mieux le "sens" des images. |
+    | **Fusion Multimodale** | **SVM + TF-IDF + CLIP** | **0.84** | **🏆 LE GAGNANT (Synergie maximale).** |
+    """)
+
+    st.divider()
+    
+    st.subheader("Analyse des erreurs : La Matrice de Confusion")
+    st.image("images/matrice_confusion.png", caption="Matrice de Confusion du Modèle de Fusion", use_container_width=True)
+    
+   
+# PAGE 4 : ASSISTANT TEXTE
+
+elif page == "4. Assistant Texte":
     st.title("Auto-catégorisation par le Texte")
     st.markdown("L'assistant analyse la désignation et la description pour déduire la catégorie.")
     
@@ -357,9 +386,9 @@ elif page == "3. Assistant Texte":
                     st.success(f"Catégorie prédite : **{nom_categorie}**")
                     st.caption(f"Code Rakuten correspondant : {code_rakuten}")
 
-# PAGE 4 : ASSISTANT IMAGE
+# PAGE 5 : ASSISTANT IMAGE
 
-elif page == "4. Assistant Image":
+elif page == "5. Assistant Image":
     st.title("Auto-catégorisation par l'Image")
     st.markdown("Importez une photo du produit. L'assistant va analyser les pixels pour déduire la catégorie.")
     
@@ -410,9 +439,9 @@ elif page == "4. Assistant Image":
                     except Exception as e:
                         st.error(f"Erreur pendant l'analyse : {e}")
 
-# PAGE 5 : ASSISTANT FUSION (TF-IDF + CLIP image + CLIP texte + SVM Linear)
+# PAGE 6 : ASSISTANT FUSION (TF-IDF + CLIP image + CLIP texte + SVM Linear)
 
-elif page == "5. Moteur Multimodal":
+elif page == "6. Moteur Multimodal":
     st.title("Assistant Fusion : TF-IDF + CLIP image + CLIP texte + SVM Linear")
     st.markdown("Le **3ᵉ modèle** combine texte et image pour une prédiction optimale (F1-macro 0,84). Saisissez la fiche produit et uploadez l'image.")
 
@@ -477,32 +506,11 @@ elif page == "5. Moteur Multimodal":
                     except Exception as e:
                         st.error(f"Erreur : {e}")
 
-    # PAGE 6 : Resultats et conclusion
+# PAGE 6 : ASSISTANT FUSION (TF-IDF + CLIP image + CLIP texte + SVM Linear)
+
+elif page == "7. Conclusion":
     
-elif page == "6. Résultats & Conclusion":
-    st.title("Résultats & Conclusion")
-
-    # --- PARTIE 1 : COMPARAISON ---
-    st.header("1. Comparaison des Performances")
-    st.write(
-        "L'objectif de cette étape était de comparer nos différentes approches sur une même métrique : "
-        "le **F1-Score Macro** (qui, contrairement à l'Accuracy, ne triche pas sur les classes minoritaires)."
-    )
-
-    st.markdown("""
-    | Approche | Modèle | F1-Score (Macro) | Verdict |
-    | :--- | :--- | :--- | :--- |
-    | **Baseline Texte** | Naive Bayes / CatBoost | 0.65 - 0.68 | Rapide, mais manque de finesse. |
-    | **Champion Texte seul** | SVM Linéaire (TF-IDF) | 0.78 | Très robuste, notre référence texte. |
-    | **Baseline Image** | ResNet50 | 0.51 | Faible (trop d'ambiguïtés visuelles). |
-    | **Champion Image seul** | CLIP (ViT-B/32) | 0.66 | Capture mieux le "sens" des images. |
-    | **Fusion Multimodale** | **SVM + TF-IDF + CLIP** | **0.84** | **🏆 LE GAGNANT (Synergie maximale).** |
-    """)
-
-    st.divider()
-
-    # --- PARTIE 2 : CONCLUSION ---
-    st.header("2. Conclusion du projet Rakuten")
+    st.header("7. Conclusion du projet Rakuten")
     st.success(
         "Le succès de ce projet réside dans la transition d'une approche textuelle classique "
         "vers un **système multimodal performant**, capable de transformer un catalogue brut et "
