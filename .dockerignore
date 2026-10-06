@@ -1,0 +1,21 @@
+# Ce qui est listé ici n'est pas envoyé à Docker pendant le build
+# (sinon le build est très lent et les images énormes)
+venv/
+.venv/
+.git/
+.github/
+__pycache__/
+*.pyc
+.env
+
+# données, modèles et notebooks : jamais dans l'image
+data/
+data brut/
+models/
+notebooks/
+images/
+rendus/
+*.csv
+*.pkl
+*.joblib
+*.npz

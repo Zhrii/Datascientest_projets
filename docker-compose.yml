@@ -1,0 +1,65 @@
+# 1 container = 1 tâche
+#
+#   mlflow   : garde l'historique des entraînements  -> http://localhost:5000
+#   api      : donne les prédictions                 -> http://localhost:8000/docs
+#   training : entraîne un modèle "candidat"         -> models/candidate
+#   promote  : compare candidat et production, garde le meilleur
+#
+# training et promote ne tournent pas en permanence :
+# on les lance à la main quand on en a besoin (profil "jobs").
+
+services:
+  mlflow:
+    build:
+      context: .
+      dockerfile: Dockerfile.mlflow
+    ports:
+      - "5000:5000"
+    volumes:
+      - mlflow_data:/mlflow/data      # l'historique reste même si on arrête le container
+    healthcheck:                      # sert à savoir quand MLflow est prêt
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./models:/app/models:ro       # modèles en lecture seule (l'API n'écrit rien)
+
+  training:
+    build:
+      context: .
+      dockerfile: Dockerfile.training
+    profiles: ["jobs"]                # pas lancé par "docker compose up"
+    depends_on:
+      mlflow:
+        condition: service_healthy    # on attend que MLflow soit prêt
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+    volumes:
+      - "./data brut:/app/data_brut:ro"   # données de départ (lecture seule)
+      - ./data:/app/data
+      - ./models:/app/models
+    # collecte -> process -> training (le modèle va dans candidate)
+    command: ["sh", "-c", "python scripts/collecte.py --data-dir /app/data_brut && python scripts/process.py && python scripts/training.py --mlflow --models-dir /app/models/candidate"]
+
+  promote:
+    build:
+      context: .
+      dockerfile: Dockerfile.training
+    profiles: ["jobs"]
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+    volumes:
+      - ./models:/app/models
+    command: ["python", "scripts/promote_model.py", "--candidate-dir", "/app/models/candidate", "--production-dir", "/app/models"]
+
+volumes:
+  mlflow_data:
