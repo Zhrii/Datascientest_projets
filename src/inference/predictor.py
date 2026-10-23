@@ -30,6 +30,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_MODELS_DIR = Path(os.getenv("MODELS_DIR", PROJECT_ROOT / "models"))
 ARTIFACTS_DIR = PROJECT_ROOT / "artifacts"
 HF_REPO = os.getenv("HF_REPO", "nicolasN2215/ecommerce-resnet-image")
+REGISTERED_TEXT_MODEL = "rakuten-text-svm"  # cf. scripts/training.py
+PRODUCTION_ALIAS = "production"             # posé par scripts/promote_model.py
 
 # F1-macro de référence (notebooks, jeu complet). Remplacés par les valeurs
 # réellement mesurées sur les artefacts chargés quand elles sont disponibles.
@@ -68,6 +70,7 @@ def _model_paths(models_dir: Path) -> Dict[str, Path]:
             models_dir / "label_encoder_image.pkl",
         ),
         "model_text": _resolve(
+            models_dir / "svm_text_model.pkl",
             models_dir / "svm_linear_baseline_final.pkl",
             models_dir / "svm_(linear)_baseline.pkl",
             models_dir / "svm_linear_baseline_27_classes_final.pkl",
@@ -93,8 +96,9 @@ def _read_json(path: Path) -> Dict[str, Any]:
 def _measured_f1(models_dir: Path) -> Dict[str, float]:
     """F1-macro mesurés par les pipelines d'entraînement / export."""
     out: Dict[str, float] = {}
-    prod = _read_json(models_dir / "registry.json").get("production", {})
-    if prod.get("modality") == "text" and "f1_macro" in prod:
+    # metrics.json : carte d'identité du modèle texte promu (scripts/promote_model.py)
+    prod = _read_json(models_dir / "metrics.json")
+    if "f1_macro" in prod:
         out["text"] = float(prod["f1_macro"])
     fusion = _read_json(ARTIFACTS_DIR / "fusion_export_meta.json")
     if "f1_macro_sample" in fusion:
@@ -120,6 +124,34 @@ def _ensure_hf_file(models_dir: Path, filename: str) -> Path:
 def _load_pickle(path: Path) -> Any:
     with open(path, "rb") as f:
         return pickle.load(f)
+
+
+def _download_production_text_model() -> Optional[Tuple[Path, Dict[str, Any]]]:
+    """Télécharge depuis le Model Registry MLflow la version marquée "production".
+
+    Renvoie (dossier local des fichiers, infos de la version), ou None si MLflow
+    n'est pas configuré / joignable ou si aucune version n'est encore promue.
+    """
+    if not os.getenv("MLFLOW_TRACKING_URI"):
+        return None
+    try:
+        os.environ.setdefault("MLFLOW_HTTP_REQUEST_MAX_RETRIES", "1")
+        os.environ.setdefault("MLFLOW_HTTP_REQUEST_TIMEOUT", "10")
+        import mlflow
+
+        client = mlflow.MlflowClient()
+        version = client.get_model_version_by_alias(REGISTERED_TEXT_MODEL, PRODUCTION_ALIAS)
+        dst = Path(tempfile.gettempdir()) / "rakuten_registry" / f"v{version.version}"
+        dst.mkdir(parents=True, exist_ok=True)
+        local = mlflow.artifacts.download_artifacts(artifact_uri=version.source, dst_path=str(dst))
+        info = {
+            "source": f"mlflow-registry:{REGISTERED_TEXT_MODEL}@{PRODUCTION_ALIAS} (v{version.version})",
+            "f1_macro": float(version.tags["f1_macro"]) if "f1_macro" in version.tags else None,
+        }
+        return Path(local), info
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Model Registry indisponible, fallback fichiers locaux: %s", exc)
+        return None
 
 
 class ProductPredictor:
@@ -152,14 +184,29 @@ class ProductPredictor:
             from src.modeling.vectorization import TFIDFVectorizer
             from src.modeling.baseline_models import BaselineModels
 
-            # Fallback HF uniquement si aucun SVM local
+            # 1) modèle de production du Model Registry (MLflow / MinIO)
+            registry = _download_production_text_model()
+            if registry is not None:
+                local_dir, info = registry
+                self._text["vectorizer"] = TFIDFVectorizer.load(local_dir / "tfidf_vectorizer.pkl")
+                self._text["model"] = BaselineModels.load_model(local_dir / "svm_text_model.pkl")
+                self._text["encoder"] = _load_pickle(local_dir / "label_encoder.pkl")
+                self.meta["text"]["source"] = info["source"]
+                if info["f1_macro"] is not None:
+                    self.meta["text"]["f1_macro"] = round(info["f1_macro"], 4)
+                self.text_ready = True
+                logger.info("Pipeline texte prêt (%s)", info["source"])
+                return
+
+            # 2) fallback : fichiers locaux de models/ (puis Hugging Face si aucun SVM)
+            self.meta["text"]["source"] = f"local:{self.models_dir}"
             if not self.paths["model_text"].exists():
                 _ensure_hf_file(self.models_dir, "svm_linear_baseline_27_classes_final.pkl")
                 self.paths = _model_paths(self.models_dir)
             if not self.paths["vectorizer"].exists() or not self.paths["model_text"].exists():
                 self._errors["text"] = (
                     "Fichiers texte manquants. Attendu: tfidf_vectorizer.pkl "
-                    "+ svm_linear_baseline_final.pkl dans models/. "
+                    "+ svm_text_model.pkl dans models/. "
                     "Lancez: .\\make.ps1 train"
                 )
                 return

@@ -1,27 +1,33 @@
+# Container "api" (et "streamlit") : prédictions texte / image / fusion
 FROM python:3.11-slim
 
 WORKDIR /app
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app \
+    MODELS_DIR=/app/models \
+    MLFLOW_DISABLE_TELEMETRY=true
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Dépendances runtime Docker (plus légères que requirements.txt complet)
-COPY requirements-docker.txt ./
-RUN pip install --no-cache-dir -r requirements-docker.txt \
-    && python -m spacy download fr_core_news_sm || true
+# les librairies d'abord (cache Docker)
+COPY requirements-api.txt ./
+RUN pip install --no-cache-dir -r requirements-api.txt \
+    && python -c "import nltk; nltk.download('stopwords', quiet=True)" \
+    && (python -m spacy download fr_core_news_sm || true)
 
+# le code seulement. Données, modèles et images sont branchés au lancement.
+# scripts/ + pipelines/ servent à POST /retrain (même pipeline que le container train)
 COPY api ./api
 COPY src ./src
+COPY scripts ./scripts
 COPY pipelines ./pipelines
 COPY app.py ./
-COPY images ./images
 
-RUN mkdir -p models artifacts data "data brut" .cache/huggingface
-
-ENV PYTHONUNBUFFERED=1
-ENV PYTHONPATH=/app
-ENV MODELS_DIR=/app/models
+RUN mkdir -p models artifacts data data_brut .cache/huggingface
 
 EXPOSE 8000 8501
 

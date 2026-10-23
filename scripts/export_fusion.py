@@ -4,7 +4,7 @@ vers models/ pour FastAPI / Streamlit.
 
 Usage :
   set FUSION_MAX_ROWS=4000
-  python pipelines/export_fusion.py
+  python scripts/export_fusion.py
 """
 
 from __future__ import annotations

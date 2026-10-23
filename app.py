@@ -339,14 +339,15 @@ elif page == "8. MLOps / API":
     |-----------|------|------|
     | FastAPI | 8000 | `/predict`, `/health`, `/model/info`, `/retrain`, `/metrics` |
     | Streamlit | 8501 | UI (cette app) |
-    | MLflow | 5000 | Tracking d'expériences |
+    | Pipeline Runner (`train`) | — | ZenML : preprocess_data → train_model → promote_model |
+    | ZenML | 8888 | Suivi des pipelines (métadonnées dans MySQL) |
+    | MinIO | 9001 | Artefacts S3 (ZenML + MLflow) |
+    | MLflow | 5000 | Expériences + Model Registry (alias `production`) |
     | Prometheus | 9092 | Scraping métriques |
     | Grafana | 3002 | Dashboards |
-    | MinIO | 9000/9001 | Artifact store S3 |
-    | ZenML | 8888 | Orchestration |
     """
     )
-    st.code(".\\make.ps1 up\n.\\make.ps1 train-docker\n.\\make.ps1 down", language="powershell")
+    st.code(".\\make.ps1 up\n.\\make.ps1 train\n.\\make.ps1 down", language="powershell")
 
     if st.button("Déclencher /retrain via API"):
         if not api_available():

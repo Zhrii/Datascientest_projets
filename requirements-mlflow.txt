@@ -1,2 +1,4 @@
 # serveur MLflow (même version que dans le container d'entraînement)
 mlflow==3.16.1
+# artefacts stockés dans MinIO (S3)
+boto3

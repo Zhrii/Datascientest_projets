@@ -32,6 +32,7 @@ x-zenml-client: &zenml-client-env
   ZENML_STORE_PASSWORD: zenml
   ZENML_ANALYTICS_OPT_IN: "false"
   ZENML_CONFIG_PATH: /app/.zenml
+  GIT_PYTHON_REFRESH: quiet         # pas de git dans les images : MLflow n'insiste pas
 
 services:
   # ---- Inference Layer ----

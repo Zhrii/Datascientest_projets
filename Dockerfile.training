@@ -1,4 +1,5 @@
-# Container "training" : lance tout le pipeline (collecte -> process -> training)
+# Container "train" (Pipeline Runner) : lance le pipeline ZenML
+# preprocess_data -> train_model -> promote_model
 # C'est un "job" : il fait son travail puis il s'arrête.
 FROM python:3.12-slim
 
@@ -9,7 +10,7 @@ ENV PYTHONUNBUFFERED=1 \
     MLFLOW_DISABLE_TELEMETRY=true
 
 # les librairies d'abord (cache Docker)
-COPY requirements-api.txt requirements-train.txt ./
+COPY requirements-train.txt ./
 RUN pip install --no-cache-dir -r requirements-train.txt
 
 RUN python -c "import nltk; nltk.download('stopwords', quiet=True)"
@@ -17,6 +18,8 @@ RUN python -c "import nltk; nltk.download('stopwords', quiet=True)"
 # le code seulement. Données et modèles sont branchés au lancement.
 COPY src/ ./src/
 COPY scripts/ ./scripts/
+COPY pipelines/ ./pipelines/
 
 # "data brut" a un espace dans son nom, donc on le branche sous /app/data_brut
-CMD ["sh", "-c", "python scripts/collecte.py --data-dir /app/data_brut && python scripts/process.py && python scripts/training.py"]
+ENV DATA_BRUT_DIR=/app/data_brut MODELS_DIR=/app/models
+CMD ["python", "pipelines/rakuten_pipeline.py"]

@@ -2,9 +2,8 @@
 param(
     [Parameter(Position = 0)]
     [ValidateSet(
-        "help", "install", "install-mlops", "api", "streamlit", "train",
-        "up", "up-full", "down", "logs", "health", "train-docker", "ps",
-        "export-fusion"
+        "help", "install", "install-mlops", "api", "streamlit", "train", "train-local",
+        "promote", "up", "down", "logs", "health", "ps", "export-fusion"
     )]
     [string]$Target = "help"
 )
@@ -20,9 +19,10 @@ Targets:
   .\make.ps1 install-mlops  + FastAPI / Prometheus / MLflow
   .\make.ps1 api            FastAPI local :8000
   .\make.ps1 streamlit      Streamlit local :8501
-  .\make.ps1 train          pipeline preprocess + train (local)
   .\make.ps1 up             docker compose — stack complète du schéma
-  .\make.ps1 train-docker   docker compose run train
+  .\make.ps1 train          pipeline ZenML (Docker) : preprocess -> train -> promote
+  .\make.ps1 train-local    sans Docker : collecte -> process -> training (candidat)
+  .\make.ps1 promote        sans Docker : met le candidat en production s'il est meilleur
   .\make.ps1 export-fusion  entraîne/exporte artefacts fusion (CLIP)
   .\make.ps1 down           stop containers
   .\make.ps1 logs           logs API
@@ -46,32 +46,36 @@ Targets:
         streamlit run app.py --server.port 8501
     }
     "train" {
-        python pipelines/train_pipeline.py
+        docker compose run --rm train
+        if ($LASTEXITCODE -ne 0) { throw "le pipeline a échoué" }
+        docker compose restart api
+    }
+    "train-local" {
+        python scripts/collecte.py --data-dir "data brut"
+        python scripts/process.py
+        python scripts/training.py --mlflow --models-dir models/candidate
+    }
+    "promote" {
+        python scripts/promote_model.py
     }
     "up" {
         docker compose up -d --build
         Write-Host ""
-        Write-Host "URLs (schéma) :"
+        Write-Host "URLs :"
         Write-Host "  FastAPI     http://localhost:8000/docs"
         Write-Host "  Streamlit   http://localhost:8501"
-        Write-Host "  ZenML       http://localhost:8888"
-        Write-Host "  Prometheus  http://localhost:9092"
-        Write-Host "  Grafana     http://localhost:3002  (admin / rakuten)"
+        Write-Host "  ZenML       http://localhost:8888  (default / zenml)"
         Write-Host "  MLflow      http://localhost:5000"
         Write-Host "  MinIO       http://localhost:9001  (minioadmin / minioadmin)"
-    }
-    "up-full" {
-        docker compose up -d --build
-    }
-    "train-docker" {
-        docker compose --profile train run --rm train
+        Write-Host "  Prometheus  http://localhost:9092"
+        Write-Host "  Grafana     http://localhost:3002  (admin / rakuten)"
     }
     "export-fusion" {
         $env:FUSION_MAX_ROWS = if ($env:FUSION_MAX_ROWS) { $env:FUSION_MAX_ROWS } else { "4000" }
-        python pipelines/export_fusion.py
+        python scripts/export_fusion.py
     }
     "down" {
-        docker compose --profile train down
+        docker compose --profile jobs down
     }
     "logs" {
         docker compose logs -f api

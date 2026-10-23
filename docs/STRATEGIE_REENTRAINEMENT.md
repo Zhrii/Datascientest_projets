@@ -34,13 +34,13 @@ models/                  <- modèle EN PRODUCTION (lu par l'API)
 └── archive/<date>/      <- anciens modèles de production (pour revenir en arrière)
 ```
 
-Les trois étapes :
+Les trois étapes sont celles du pipeline ZenML `rakuten_training_pipeline`, lancé par `.\make.ps1 train` (ou `POST /retrain` sur l'API) :
 
-1. **Entraînement** (`docker compose run --rm training`) : le nouveau modèle est écrit dans `models/candidate/` et le run est noté dans MLflow.
-2. **Promotion** (`docker compose run --rm promote`) : on compare le F1-macro du candidat avec celui de la production.
-   - Candidat au moins aussi bon : l'ancien modèle est archivé, le candidat prend sa place, et le run MLflow reçoit le tag `promoted_to_production=true`.
+1. **Entraînement** (étapes `preprocess_data` puis `train_model`) : le nouveau modèle est écrit dans `models/candidate/`, le run est noté dans MLflow et le modèle devient une nouvelle version de `rakuten-text-svm` dans le Model Registry.
+2. **Promotion** (étape `promote_model`) : on compare le F1-macro du candidat avec celui de la production.
+   - Candidat au moins aussi bon : l'ancien modèle est archivé, le candidat prend sa place, sa version reçoit l'alias `production` dans le Model Registry, et le run MLflow reçoit le tag `promoted_to_production=true`.
    - Candidat moins bon : refusé, la production ne bouge pas, le tag est `false`.
-3. **Mise en service** (`docker compose restart api`) : l'API recharge le modèle.
+3. **Mise en service** : l'API charge `rakuten-text-svm@production` depuis le Model Registry (`make train` redémarre l'API ; `POST /retrain` recharge le modèle tout seul).
 
 Les protections :
 - le candidat doit être complet (3 fichiers + `metrics.json`, écrit en dernier), sinon la promotion s'arrête ;
@@ -59,7 +59,7 @@ copy models\archive\<date>\metrics.json models\
 docker compose restart api
 ```
 
-MLflow garde aussi les 3 fichiers de chaque entraînement (onglet Artifacts), c'est une deuxième sauvegarde.
+MLflow garde aussi les 3 fichiers de chaque entraînement (onglet Artifacts, stockés dans MinIO). Autre façon de revenir en arrière : dans MLflow (onglet Models), déplacer l'alias `production` sur une version précédente, puis redémarrer l'API.
 
 ## 5. Limites (à dire honnêtement dans le rapport)
 

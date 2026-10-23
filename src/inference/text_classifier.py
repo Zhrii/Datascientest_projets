@@ -1,10 +1,9 @@
 """
-À placer dans src/inference.py de votre projet.
+Classifieur texte léger (TF-IDF + SVM) utilisé par scripts/predict.py.
 
-Charge une seule fois les 3 artefacts du modèle texte (vectorizer, modèle,
-encoder) et expose une fonction predict() réutilisée à la fois par
-scripts/predict.py et par l'API (api/main.py) — c'est le point commun qui
-garantit que le modèle entraîné est bien "réutilisable par l'API".
+Charge une seule fois les 3 artefacts du modèle texte produits par
+scripts/training.py (vectorizer, modèle, encoder). L'API utilise les mêmes
+fichiers via src/inference/predictor.py.
 """
 from pathlib import Path
 import pickle
@@ -15,18 +14,7 @@ from src.modeling.vectorization import TFIDFVectorizer
 from src.modeling.baseline_models import BaselineModels
 from src.preprocessing.pipeline import PreprocessingPipeline
 
-# Dictionnaire de traduction des 27 catégories Rakuten (repris de app.py)
-DICT_CATEGORIES = {
-    10: "Livre d'occasion", 40: "Jeux vidéo", 50: "Accessoire jeu vidéo",
-    60: "Console de jeux", 1140: "Figurine / Goodies", 1160: "Cartes à collectionner",
-    1180: "Jeu de plateau / Warhammer", 1280: "Jouet enfant", 1281: "Jeu de société",
-    1300: "Jouet technique / Modélisme", 1301: "Vêtement enfant / Puériculture",
-    1302: "Jeu d'extérieur", 1320: "Puériculture", 1560: "Mobilier",
-    1920: "Chambre / Literie", 1940: "Alimentation / Épicerie", 2060: "Décoration intérieure",
-    2220: "Animalerie", 2280: "Magazine", 2403: "Livre / BD", 2462: "Jeu vidéo (Occasion)",
-    2522: "Papeterie", 2582: "Meuble d'extérieur", 2583: "Piscine / Spa",
-    2585: "Bricolage / Jardinage", 2705: "Livre neuf", 2905: "Jeu PC",
-}
+from .categories import DICT_CATEGORIES
 
 
 class TextClassifier:

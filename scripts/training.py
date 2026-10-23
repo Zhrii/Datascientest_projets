@@ -38,6 +38,7 @@ RANDOM_STATE = 42   # même découpage à chaque fois
 TEST_SIZE = 0.2     # 20% pour tester le modèle
 ARTIFACT_FILES = ["tfidf_vectorizer.pkl", "svm_text_model.pkl", "label_encoder.pkl"]
 INFO_FILE = "metrics.json"  # lu ensuite par promote_model.py
+REGISTERED_MODEL = "rakuten-text-svm"  # nom dans le Model Registry MLflow
 
 
 def train(input_path, models_dir, use_mlflow):
@@ -85,7 +86,7 @@ def train(input_path, models_dir, use_mlflow):
     print(f"💾 Modèle sauvegardé dans {models_dir}/")
 
     # on note le run dans MLflow si on a demandé --mlflow
-    run_id = None
+    run_id, model_version = None, None
     if use_mlflow:
         params = {
             "model": MODEL_NAME,
@@ -100,7 +101,7 @@ def train(input_path, models_dir, use_mlflow):
             "n_val": len(X_val),
             "n_classes": len(encoder.classes_),
         }
-        run_id = log_to_mlflow(params, metrics, models_dir_path)
+        run_id, model_version = log_to_mlflow(params, metrics, models_dir_path)
 
     # carte d'identité du modèle, écrite en DERNIER :
     # si elle existe, c'est que tout le reste s'est bien passé
@@ -110,6 +111,7 @@ def train(input_path, models_dir, use_mlflow):
         "n_train": len(X_train),
         "n_val": len(X_val),
         "mlflow_run_id": run_id,
+        "mlflow_model_version": model_version,
         **{k: float(v) for k, v in metrics.items()},
     }
     with open(models_dir_path / INFO_FILE, "w", encoding="utf-8") as f:
@@ -119,13 +121,14 @@ def train(input_path, models_dir, use_mlflow):
 
 
 def log_to_mlflow(params, metrics, models_dir):
-    """Envoie les paramètres, les scores et les fichiers du modèle à MLflow.
-    Renvoie l'identifiant du run (ou None si mlflow n'est pas installé)."""
+    """Envoie les paramètres, les scores et les fichiers du modèle à MLflow,
+    puis enregistre le modèle dans le Model Registry.
+    Renvoie (run_id, version du modèle), ou (None, None) si mlflow n'est pas installé."""
     try:
         import mlflow
     except ImportError:
         print("⚠️  mlflow n'est pas installé (pip install mlflow), on saute cette étape.")
-        return None
+        return None, None
 
     # si le serveur ne répond pas, on abandonne vite (pas de longue attente)
     os.environ.setdefault("MLFLOW_HTTP_REQUEST_MAX_RETRIES", "2")
@@ -142,7 +145,22 @@ def log_to_mlflow(params, metrics, models_dir):
         for name in ARTIFACT_FILES:
             mlflow.log_artifact(str(models_dir / name), artifact_path="model_artifacts")
         print(f"🎯 Run MLflow enregistré : {run.info.run_id}  ({tracking_uri})")
-        return run.info.run_id
+
+    # le modèle devient une nouvelle version dans le Model Registry
+    # (l'alias "production" est posé plus tard par promote_model.py)
+    client = mlflow.MlflowClient()
+    try:
+        client.get_registered_model(REGISTERED_MODEL)
+    except mlflow.exceptions.MlflowException:
+        client.create_registered_model(REGISTERED_MODEL)
+    version = client.create_model_version(
+        name=REGISTERED_MODEL,
+        source=f"{run.info.artifact_uri}/model_artifacts",
+        run_id=run.info.run_id,
+        tags={k: f"{v:.4f}" for k, v in metrics.items()},
+    )
+    print(f"📚 Model Registry : {REGISTERED_MODEL} version {version.version}")
+    return run.info.run_id, version.version
 
 
 def main():

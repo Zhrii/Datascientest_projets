@@ -27,6 +27,8 @@ from pathlib import Path
 ARTIFACT_FILES = ["tfidf_vectorizer.pkl", "svm_text_model.pkl", "label_encoder.pkl"]
 INFO_FILE = "metrics.json"
 METRIC = "f1_macro"  # le score qu'on compare
+REGISTERED_MODEL = "rakuten-text-svm"  # même nom que dans training.py
+PRODUCTION_ALIAS = "production"        # alias lu par l'API dans le Model Registry
 
 # les 3 résultats possibles du script
 EXIT_PROMOTED, EXIT_ERROR, EXIT_REJECTED = 0, 1, 2
@@ -78,9 +80,10 @@ def install_candidate(candidate_dir, production_dir, extra_info):
     os.replace(tmp, production_dir / INFO_FILE)
 
 
-def tag_mlflow_run(run_id, promoted):
-    """Met une étiquette 'promoted_to_production' sur le run dans MLflow.
-    C'est un bonus : si ça rate, ce n'est pas grave."""
+def tag_mlflow_run(run_id, promoted, model_version=None):
+    """Met une étiquette 'promoted_to_production' sur le run dans MLflow et,
+    si le candidat est promu, pose l'alias "production" sur sa version
+    dans le Model Registry. Si ça rate, la promotion locale reste valable."""
     if not run_id or not os.getenv("MLFLOW_TRACKING_URI"):
         return
     try:
@@ -88,13 +91,17 @@ def tag_mlflow_run(run_id, promoted):
         os.environ.setdefault("MLFLOW_HTTP_REQUEST_TIMEOUT", "10")
         import mlflow
         mlflow.set_tracking_uri(os.environ["MLFLOW_TRACKING_URI"])
-        mlflow.MlflowClient().set_tag(run_id, "promoted_to_production", str(promoted).lower())
+        client = mlflow.MlflowClient()
+        client.set_tag(run_id, "promoted_to_production", str(promoted).lower())
         print(f"🏷️  Run MLflow {run_id[:8]}… marqué promoted_to_production={str(promoted).lower()}")
+        if promoted and model_version:
+            client.set_registered_model_alias(REGISTERED_MODEL, PRODUCTION_ALIAS, str(model_version))
+            print(f"📚 Model Registry : {REGISTERED_MODEL}@{PRODUCTION_ALIAS} -> version {model_version}")
     except Exception as exc:  # noqa: BLE001
-        print(f"⚠️  Impossible de marquer le run dans MLflow ({type(exc).__name__}), on continue.")
+        print(f"⚠️  Impossible de mettre à jour MLflow ({type(exc).__name__}), on continue.")
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description="Promotion d'un modèle candidat en production")
     parser.add_argument("--candidate-dir", default="models/candidate")
     parser.add_argument("--production-dir", default="models")
@@ -102,7 +109,7 @@ def main():
                         help="gain minimal de F1 exigé (0 = on accepte l'égalité)")
     parser.add_argument("--dry-run", action="store_true", help="simule, ne change rien")
     parser.add_argument("--force", action="store_true", help="promeut sans comparer")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     candidate_dir = Path(args.candidate_dir)
     production_dir = Path(args.production_dir)
@@ -111,7 +118,7 @@ def main():
     missing = missing_files(candidate_dir)
     if missing:
         print(f"❌ Candidat incomplet dans {candidate_dir}/ : il manque {', '.join(missing)}")
-        print("   Lance d'abord l'entraînement (docker compose run --rm training).")
+        print("   Lance d'abord l'entraînement (make train, ou scripts/training.py).")
         return EXIT_ERROR
 
     # 2) on lit les scores
@@ -128,6 +135,7 @@ def main():
         print(f"📦 Production : {METRIC} = {prod_score:.4f}  (entraîné le {production.get('trained_at', '?')})")
 
     run_id = candidate.get("mlflow_run_id")
+    model_version = candidate.get("mlflow_model_version")
 
     # 3) si ce candidat est déjà en production (script relancé deux fois), on ne fait rien
     if production is not None and run_id and production.get("mlflow_run_id") == run_id and not args.force:
@@ -166,7 +174,7 @@ def main():
     if archived:
         print(f"🗄️  Ancien modèle archivé dans {archived}/")
     print("   Redémarre l'API pour qu'elle charge le nouveau modèle : docker compose restart api")
-    tag_mlflow_run(run_id, True)
+    tag_mlflow_run(run_id, True, model_version)
     return EXIT_PROMOTED
 
 

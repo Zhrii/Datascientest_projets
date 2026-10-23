@@ -1,7 +1,7 @@
-.PHONY: help install api streamlit train up down logs health train-docker ps
+.PHONY: help install api streamlit train train-local promote up down logs health ps
 
 help:
-	@echo "make up | down | train | train-docker | api | streamlit | health | ps"
+	@echo "make up | down | train | train-local | promote | api | streamlit | health | ps"
 
 install:
 	pip install -r requirements.txt
@@ -13,17 +13,27 @@ api:
 streamlit:
 	streamlit run app.py --server.port 8501
 
+# Pipeline Runner ZenML (Docker) : preprocess_data -> train_model -> promote_model
 train:
-	python pipelines/train_pipeline.py
+	docker compose run --rm train
+	docker compose restart api
+
+# sans Docker ni ZenML : collecte -> process -> training (candidat dans models/candidate)
+train-local:
+	python scripts/collecte.py --data-dir "data brut"
+	python scripts/process.py
+	python scripts/training.py --mlflow --models-dir models/candidate
+
+# met le candidat en production s'il est au moins aussi bon
+promote:
+	python scripts/promote_model.py
 
 up:
 	docker compose up -d --build
 
-train-docker:
-	docker compose --profile train run --rm train
 
 down:
-	docker compose --profile train down
+	docker compose --profile jobs down
 
 logs:
 	docker compose logs -f api

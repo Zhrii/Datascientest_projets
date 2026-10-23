@@ -53,9 +53,11 @@ Datascientest_projets/
 │   ├── interpretability/   # SHAP, feature importance
 │   ├── image/              # Chargement images, extraction de features
 │   ├── multimodal/         # Matching texte-image (PyTorch)
-│   └── inference/          # Prédicteur partagé API / Streamlit
+│   └── inference/          # Prédicteur partagé API / Streamlit / scripts
 ├── api/                    # API FastAPI (inférence, /metrics, /retrain)
-├── pipelines/              # Pipeline d'entraînement + export fusion
+├── pipelines/              # Pipeline ZenML (preprocess_data → train_model → promote_model)
+├── scripts/                # Étapes : collecte, process, training, promote, predict
+├── docs/                   # Stratégie de réentraînement
 ├── monitoring/             # Prometheus + Grafana (provisioning)
 ├── models/                 # Modèles sauvegardés (générés)
 ├── artifacts/              # Métadonnées des runs (générées)
@@ -71,12 +73,12 @@ Datascientest_projets/
 
 Workspace de référence : **`Datascientest_projets`** (données + modèles locaux).
 
-Voir **[ARCHITECTURE.md](ARCHITECTURE.md)** — stack Docker alignée sur le schéma ZenML.
+Voir **[ARCHITECTURE.md](ARCHITECTURE.md)** (stack Docker) et **[docs/STRATEGIE_REENTRAINEMENT.md](docs/STRATEGIE_REENTRAINEMENT.md)** (candidat → promotion → rollback).
 
 ```powershell
 # 1) Docker Desktop doit être démarré (icône baleine verte)
-.\make.ps1 up              # toute la stack du schéma
-.\make.ps1 train-docker    # pipeline preprocess → train
+.\make.ps1 up              # toute la stack
+.\make.ps1 train           # pipeline ZenML → promotion si meilleur → restart API
 .\make.ps1 down            # stop
 ```
 
@@ -84,11 +86,11 @@ Voir **[ARCHITECTURE.md](ARCHITECTURE.md)** — stack Docker alignée sur le sch
 |---------|-----|
 | FastAPI | http://localhost:8000/docs |
 | Streamlit | http://localhost:8501 |
-| ZenML | http://localhost:8888 |
+| ZenML | http://localhost:8888 (`default` / `zenml`) |
+| MinIO | http://localhost:9001 (`minioadmin` / `minioadmin`) |
 | Prometheus | http://localhost:9092 |
 | Grafana | http://localhost:3002 (`admin` / `rakuten`) |
 | MLflow | http://localhost:5000 |
-| MinIO | http://localhost:9001 |
 
 Sans Docker (API seule) :
 
