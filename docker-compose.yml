@@ -13,18 +13,27 @@
 #     mysql      : métadonnées ZenML
 #     minio      : artefacts S3 (ZenML + MLflow)       -> http://localhost:9001
 #     mlflow     : expériences + Model Registry        -> http://localhost:5000
+#   Automatisation
+#     scheduler  : déclenche /retrain tout seul (modèle trop vieux, +10 % de données)
 #   Monitoring
-#     prometheus : collecte les métriques de l'API     -> http://localhost:9092
-#     grafana    : tableaux de bord                    -> http://localhost:3002
+#     prometheus : métriques de l'API + règles d'alerte -> http://localhost:9092
+#     grafana    : tableaux de bord + alertes actives   -> http://localhost:3002
 #
 #   docker compose up -d --build
 #   docker compose run --rm train          (= make train)
+#
+# Identifiants de l'API (HTTP Basic) : API_USERNAME / API_PASSWORD
+# (admin / rakuten par défaut, à changer via un fichier .env)
 # =============================================================================
 
 x-s3: &s3-env
   AWS_ACCESS_KEY_ID: minioadmin
   AWS_SECRET_ACCESS_KEY: minioadmin
   MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+
+x-api-credentials: &api-credentials
+  API_USERNAME: ${API_USERNAME:-admin}
+  API_PASSWORD: ${API_PASSWORD:-rakuten}
 
 x-zenml-client: &zenml-client-env
   ZENML_STORE_URL: http://zenml:8080
@@ -45,11 +54,13 @@ services:
     ports:
       - "8000:8000"
     environment:
-      <<: [*s3-env, *zenml-client-env]
+      <<: [*s3-env, *zenml-client-env, *api-credentials]
       MODELS_DIR: /app/models
       DATA_BRUT_DIR: /app/data_brut
       MLFLOW_TRACKING_URI: http://mlflow:5000
       HF_HOME: /app/.cache/huggingface
+      PREDICT_RATE_LIMIT: ${PREDICT_RATE_LIMIT:-30/minute}
+      RETRAIN_RATE_LIMIT: ${RETRAIN_RATE_LIMIT:-2/hour}
     volumes:
       # écriture nécessaire pour POST /retrain (candidat + promotion)
       - ./models:/app/models
@@ -75,6 +86,7 @@ services:
     ports:
       - "8501:8501"
     environment:
+      <<: *api-credentials
       API_URL: http://api:8000
       MODELS_DIR: /app/models
     volumes:
@@ -106,6 +118,27 @@ services:
         condition: service_healthy
       minio-init:
         condition: service_completed_successfully
+
+  # ---- Automatisation des entraînements ----
+  scheduler:
+    image: rakuten-training:latest
+    container_name: rakuten-scheduler
+    command: ["python", "pipelines/scheduler.py"]
+    environment:
+      <<: *api-credentials
+      API_URL: http://api:8000
+      DATA_BRUT_DIR: /app/data_brut
+      MODELS_DIR: /app/models
+      CHECK_INTERVAL_SECONDS: ${CHECK_INTERVAL_SECONDS:-3600}
+      RETRAIN_MAX_AGE_DAYS: ${RETRAIN_MAX_AGE_DAYS:-30}
+      NEW_DATA_THRESHOLD: ${NEW_DATA_THRESHOLD:-0.10}
+    volumes:
+      - "./data brut:/app/data_brut:ro"
+      - ./models:/app/models:ro
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
 
   # ---- ZenML Platform ----
   zenml:
@@ -216,6 +249,7 @@ services:
       - "9092:9090"
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
       - prometheus_data:/prometheus
     depends_on:
       - api

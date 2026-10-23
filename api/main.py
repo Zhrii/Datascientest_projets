@@ -1,12 +1,12 @@
 """
 API d'inférence FastAPI — couche Inference de la stack MLOps.
 
-Endpoints :
-  POST /predict      — classification texte / image / fusion
-  GET  /health       — santé API + modèles
-  GET  /model/info   — métadonnées des pipelines
-  POST /retrain      — entraîne un candidat puis le promeut s'il est meilleur (async)
-  GET  /metrics      — métriques Prometheus
+Endpoints (🔒 = login / mot de passe HTTP Basic, voir api/security.py) :
+  POST /predict      🔒 classification texte / image / fusion (limite PREDICT_RATE_LIMIT)
+  GET  /model/info   🔒 métadonnées des pipelines
+  POST /retrain      🔒 pipeline ZenML, promotion si meilleur (limite RETRAIN_RATE_LIMIT)
+  GET  /health          santé API + modèles (public : healthcheck Docker)
+  GET  /metrics         métriques Prometheus (public : scrape Prometheus)
 """
 
 from __future__ import annotations
@@ -18,10 +18,11 @@ import os
 import sys
 import time
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from prometheus_client import (
@@ -38,6 +39,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from api.security import predict_limiter, require_user, retrain_limiter  # noqa: E402
 from src.inference.predictor import ProductPredictor  # noqa: E402
 
 logging.basicConfig(level=logging.INFO)
@@ -49,6 +51,10 @@ PREDICT_COUNT = Counter(
     "Nombre de requêtes /predict",
     ["modality", "status"],
 )
+# séries exposées à 0 dès le démarrage (sinon increase() ignore la première erreur)
+for _modality in ("text", "image", "fusion"):
+    for _status in ("ok", "error", "unavailable"):
+        PREDICT_COUNT.labels(modality=_modality, status=_status)
 PREDICT_LATENCY = Histogram(
     "predict_latency_seconds",
     "Latence /predict",
@@ -57,6 +63,13 @@ PREDICT_LATENCY = Histogram(
 )
 MODEL_READY = Gauge("model_ready", "Pipeline chargé (1/0)", ["pipeline"])
 RETRAIN_RUNNING = Gauge("retrain_running", "Retrain en cours (1/0)")
+MODEL_F1 = Gauge("model_f1_macro", "F1-macro du modèle chargé", ["pipeline"])
+MODEL_TRAINED_AT = Gauge(
+    "model_trained_timestamp_seconds", "Date d'entraînement du modèle texte en production (epoch)"
+)
+
+MODELS_DIR = Path(os.getenv("MODELS_DIR", str(ROOT / "models")))
+PIPELINE_SCRIPT = ROOT / "pipelines" / "rakuten_pipeline.py"
 
 _predictor: Optional[ProductPredictor] = None
 _retrain_lock = asyncio.Lock()
@@ -76,6 +89,19 @@ def _refresh_ready_gauges() -> None:
     MODEL_READY.labels(pipeline="text").set(1 if p.text_ready else 0)
     MODEL_READY.labels(pipeline="image").set(1 if p.image_ready else 0)
     MODEL_READY.labels(pipeline="fusion").set(1 if p.fusion_ready else 0)
+    for name, meta in p.info()["pipelines"].items():
+        if meta.get("f1_macro") is not None:
+            MODEL_F1.labels(pipeline=name).set(meta["f1_macro"])
+    trained_at = _read_json(MODELS_DIR / "metrics.json").get("trained_at")
+    if trained_at:
+        MODEL_TRAINED_AT.set(datetime.fromisoformat(trained_at).timestamp())
+
+
+def _read_json(path: Path) -> dict:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
 
 
 @asynccontextmanager
@@ -129,7 +155,7 @@ def health():
     return payload
 
 
-@app.get("/model/info")
+@app.get("/model/info", dependencies=[Depends(require_user)])
 def model_info():
     return get_predictor().info()
 
@@ -138,6 +164,7 @@ def model_info():
 async def predict(
     text: Optional[str] = Form(None),
     image: Optional[UploadFile] = File(None),
+    user: str = Depends(predict_limiter.dependency()),
 ):
     """
     Classification produit.
@@ -190,15 +217,8 @@ async def predict(
     )
 
 
-MODELS_DIR = Path(os.getenv("MODELS_DIR", str(ROOT / "models")))
-PIPELINE_SCRIPT = ROOT / "pipelines" / "rakuten_pipeline.py"
-
-
 def _run_id(metrics_json: Path) -> Optional[str]:
-    try:
-        return json.loads(metrics_json.read_text(encoding="utf-8")).get("mlflow_run_id")
-    except (OSError, ValueError):
-        return None
+    return _read_json(metrics_json).get("mlflow_run_id")
 
 
 async def _run_retrain() -> None:
@@ -233,7 +253,7 @@ async def _run_retrain() -> None:
 
 
 @app.post("/retrain")
-async def retrain():
+async def retrain(user: str = Depends(retrain_limiter.dependency())):
     """Lance le pipeline ZenML preprocess_data → train_model → promote_model (non bloquant).
 
     Le nouveau modèle n'est mis en production que s'il est au moins aussi
@@ -264,4 +284,5 @@ def root():
         "service": "Rakuten Classification API",
         "docs": "/docs",
         "endpoints": ["/predict", "/health", "/model/info", "/retrain", "/metrics"],
+        "auth": "HTTP Basic sur /predict, /model/info, /retrain",
     }

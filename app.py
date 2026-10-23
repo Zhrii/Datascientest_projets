@@ -14,7 +14,15 @@ import streamlit as st
 sys.path.append(os.path.abspath("."))
 
 from src.inference.categories import DICT_CATEGORIES
-from src.inference.api_client import api_available, predict_via_api, trigger_retrain
+import requests
+
+from src.inference.api_client import (
+    api_available,
+    burst_predict,
+    predict_via_api,
+    probe_without_auth,
+    trigger_retrain,
+)
 
 # ---------------------------------------------------------------------------
 # Page config & style
@@ -68,7 +76,16 @@ def run_predict(text=None, image_file=None):
     if api_available():
         try:
             return predict_via_api(text=text, image_bytes=image_bytes, filename=filename), "api"
-        except Exception as exc:  # noqa: BLE001
+        except requests.HTTPError as exc:
+            # refus de l'API (mot de passe, limite de requêtes) : on l'affiche tel quel
+            code = exc.response.status_code
+            if code == 401:
+                raise RuntimeError("API : identifiants refusés (401)") from exc
+            if code == 429:
+                wait = exc.response.headers.get("Retry-After", "?")
+                raise RuntimeError(f"API : limite de requêtes atteinte (429), réessayer dans {wait} s") from exc
+            st.warning(f"API en erreur ({code}) — fallback local.")
+        except requests.RequestException as exc:
             st.warning(f"API indisponible ({exc}) — fallback local.")
 
     predictor = _local_predictor()
@@ -337,16 +354,40 @@ elif page == "8. MLOps / API":
 
     | Composant | Port | Rôle |
     |-----------|------|------|
-    | FastAPI | 8000 | `/predict`, `/health`, `/model/info`, `/retrain`, `/metrics` |
+    | FastAPI | 8000 | `/predict` 🔒, `/model/info` 🔒, `/retrain` 🔒, `/health`, `/metrics` |
     | Streamlit | 8501 | UI (cette app) |
     | Pipeline Runner (`train`) | — | ZenML : preprocess_data → train_model → promote_model |
     | ZenML | 8888 | Suivi des pipelines (métadonnées dans MySQL) |
     | MinIO | 9001 | Artefacts S3 (ZenML + MLflow) |
     | MLflow | 5000 | Expériences + Model Registry (alias `production`) |
-    | Prometheus | 9092 | Scraping métriques |
-    | Grafana | 3002 | Dashboards |
+    | Scheduler | — | Déclenche `/retrain` tout seul (modèle trop vieux / +10 % de données) |
+    | Prometheus | 9092 | Scraping métriques + règles d'alerte |
+    | Grafana | 3002 | Dashboards + alertes actives |
     """
     )
+
+    st.subheader("Sécurité de l'API")
+    st.markdown(
+        "- 🔒 Login / mot de passe (HTTP Basic) sur `/predict`, `/model/info`, `/retrain`\n"
+        "- ⏱️ Limite de requêtes : 30 prédictions / minute et 2 réentraînements / heure par utilisateur "
+        "(au-delà : erreur **429**)\n"
+        "- 📈 Refus comptés dans Prometheus (`auth_failures_total`, `rate_limited_total`) → alertes Grafana"
+    )
+    col_a, col_b = st.columns(2)
+    with col_a:
+        if st.button("Appeler /predict sans mot de passe"):
+            try:
+                st.info(f"Réponse de l'API : **{probe_without_auth()}** (401 = accès refusé)")
+            except requests.RequestException as e:
+                st.error(str(e))
+    with col_b:
+        if st.button("Envoyer 40 prédictions d'affilée"):
+            with st.spinner("Rafale en cours..."):
+                try:
+                    codes = burst_predict(40)
+                    st.info(f"Codes HTTP reçus : {codes} (200 = OK, 429 = limite atteinte)")
+                except requests.RequestException as e:
+                    st.error(str(e))
     st.code(".\\make.ps1 up\n.\\make.ps1 train\n.\\make.ps1 down", language="powershell")
 
     if st.button("Déclencher /retrain via API"):

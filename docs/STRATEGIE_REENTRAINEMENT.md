@@ -18,7 +18,7 @@ Il faut donc décider **quand** on réentraîne, **comment** on le fait sans ris
 | Rythme régulier | une fois par mois | à valider en équipe |
 | Code d'entraînement modifié | à chaque changement | manuel |
 
-Pour l'instant (Phase 2), on lance tout **à la main** avec une commande. L'automatisation viendra en Phase 3, et la détection automatique d'une baisse de qualité en Phase 4 (Prometheus et Grafana).
+Ces déclencheurs sont **automatisés** (Phase 3) : le container `scheduler` (`pipelines/scheduler.py`) vérifie toutes les heures l'âge du modèle (> 30 jours) et la quantité de données (+10 %), et lance alors le réentraînement via `POST /retrain`. On peut toujours le lancer à la main avec `.\make.ps1 train`. En Phase 4, Prometheus surveille le F1 du modèle en production (alerte `ModelF1Low` sous 0,75) et son âge (alerte `ModelTooOld`).
 
 ## 3. Comment réentraîner sans risque ?
 
@@ -65,5 +65,5 @@ MLflow garde aussi les 3 fichiers de chaque entraînement (onglet Artifacts, sto
 
 - **Les deux modèles ne sont pas testés sur exactement les mêmes produits.** Chaque entraînement tire ses 20 % de test au hasard (avec une graine fixe) dans les données du moment. Si les données changent, la comparaison n'est pas parfaite. Amélioration possible : un jeu de test fixe, jamais utilisé pour entraîner.
 - **Pas de détection automatique d'une baisse de qualité.** Le F1 ne se calcule que sur des produits dont on connaît la vraie catégorie. Piste pour la Phase 4 : surveiller la répartition des catégories prédites et la confiance du modèle avec Prometheus et Grafana.
-- **Déclenchement manuel.** À automatiser en Phase 3.
+- **Le déclencheur « F1 < 0,75 sur des produits récents » n'est pas automatisé.** Il faudrait des produits récents dont on connaît la vraie catégorie (retours des modérateurs). Le scheduler ne gère que l'âge du modèle et la quantité de données ; l'alerte `ModelF1Low` porte sur le F1 mesuré à l'entraînement.
 - **Un seul critère de décision (le F1-macro).** On pourrait aussi regarder le score par classe, pour ne pas promouvoir un modèle qui s'effondre sur une petite classe.

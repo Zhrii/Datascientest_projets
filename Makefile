@@ -1,7 +1,7 @@
-.PHONY: help install api streamlit train train-local promote up down logs health ps
+.PHONY: help install api streamlit train train-local promote test up down logs health ps
 
 help:
-	@echo "make up | down | train | train-local | promote | api | streamlit | health | ps"
+	@echo "make up | down | train | train-local | promote | test | api | streamlit | health | ps"
 
 install:
 	pip install -r requirements.txt
@@ -27,6 +27,10 @@ train-local:
 # met le candidat en production s'il est au moins aussi bon
 promote:
 	python scripts/promote_model.py
+
+# tests pytest dans l'image de l'API (même chose en CI : .github/workflows/tests.yml)
+test:
+	docker compose run --rm --no-deps api pytest -q
 
 up:
 	docker compose up -d --build

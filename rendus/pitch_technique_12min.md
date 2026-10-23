@@ -96,13 +96,15 @@ On explore CLIP et le fine-tuning. CLIP est un modèle vision-langage entraîné
 
 Une fois le modèle champion identifié — fusion F1-macro 0,84 — on l’industrialise selon le schéma d’architecture ZenML.
 
-**Inférence.** FastAPI sur le port 8000 expose `/predict`, `/health`, `/model/info`, `/retrain` et `/metrics`. Streamlit devient un client de cette API : la démo appelle le même service que la “prod”.
+**Inférence.** FastAPI sur le port 8000 expose `/predict`, `/health`, `/model/info`, `/retrain` et `/metrics`. Streamlit devient un client de cette API : la démo appelle le même service que la “prod”. Le modèle texte est chargé depuis le Model Registry de MLflow, version marquée « production ».
 
-**Pipeline.** Deux steps reproductibles — `preprocess_data` puis `train_model` — lancés via `make train` ou Docker. Les métriques partent dans MLflow ; les artefacts modèles sont versionnés localement.
+**Pipeline.** Un pipeline ZenML en trois étapes — `preprocess_data`, `train_model`, `promote_model` — lancé par `make train`, par l’API ou automatiquement par un scheduler quand le modèle a plus de trente jours ou qu’il y a dix pour cent de données en plus. Le nouveau modèle n’entre en production que s’il est au moins aussi bon que l’actuel ; l’ancien est archivé. MLflow trace chaque entraînement, MinIO stocke les artefacts, MySQL les métadonnées de ZenML.
 
-**Monitoring.** Prometheus scrape les métriques d’API ; Grafana visualise latence et volume de prédictions. ZenML orchestre, MinIO joue le rôle de store S3, MySQL stocke les métadonnées ZenML.
+**Sécurité et qualité.** L’API demande un login et un mot de passe, et limite chaque utilisateur à trente prédictions par minute. Trente tests pytest vérifient l’API, la sécurité, la promotion et le scheduler, à chaque push sur GitHub.
 
-**Valeur.** On ne refait pas la science dans Docker : on montre qu’un modèle labo devient un service déployable, observable et réentraînable.
+**Monitoring.** Prometheus collecte les métriques de l’API — volume, latence, erreurs, refus de sécurité, F1 et âge du modèle — et évalue huit règles d’alerte ; Grafana les affiche.
+
+**Valeur.** On ne refait pas la science dans Docker : on montre qu’un modèle labo devient un service déployable, sécurisé, observable et réentraînable.
 
 Commande de démarrage : `.\make.ps1 up`. Détails dans `ARCHITECTURE.md` et `rendus/resume_mlops.md`.
 

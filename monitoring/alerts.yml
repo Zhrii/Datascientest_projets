@@ -1,0 +1,77 @@
+# Règles d'alerte Prometheus — visibles sur http://localhost:9092/alerts
+# et dans le dashboard Grafana "Rakuten Inference API" (panneau "Alertes actives").
+groups:
+  - name: rakuten-api
+    rules:
+      - alert: ApiDown
+        expr: up{job="rakuten-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "L'API d'inférence ne répond plus"
+          description: "Prometheus n'arrive plus à lire /metrics depuis 1 minute."
+
+      - alert: ModelNotLoaded
+        expr: model_ready == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Modèle {{ $labels.pipeline }} non chargé"
+          description: "Le pipeline {{ $labels.pipeline }} est indisponible depuis 2 minutes (voir GET /health)."
+
+      - alert: HighErrorRate
+        expr: |
+          sum(rate(predict_requests_total{status!="ok"}[5m]))
+            / sum(rate(predict_requests_total[5m])) > 0.10
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Plus de 10 % de prédictions en erreur"
+          description: "Taux d'erreur /predict : {{ $value | humanizePercentage }} sur 5 minutes."
+
+      - alert: HighLatency
+        expr: histogram_quantile(0.95, sum by (le) (rate(predict_latency_seconds_bucket[5m]))) > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Prédictions lentes (p95 > 2 s)"
+          description: "Latence p95 de /predict : {{ $value | humanizeDuration }}."
+
+      - alert: RateLimitHit
+        expr: sum(increase(rate_limited_total[5m])) > 10
+        labels:
+          severity: warning
+        annotations:
+          summary: "Beaucoup de requêtes bloquées par la limite"
+          description: "{{ $value | printf \"%.0f\" }} requêtes refusées (429) en 5 minutes : usage anormal ou client mal configuré."
+
+      - alert: AuthFailures
+        expr: sum(increase(auth_failures_total[5m])) > 5
+        labels:
+          severity: warning
+        annotations:
+          summary: "Tentatives de connexion refusées"
+          description: "{{ $value | printf \"%.0f\" }} échecs d'authentification en 5 minutes (mot de passe deviné ?)."
+
+  - name: rakuten-model
+    rules:
+      - alert: ModelF1Low
+        expr: model_f1_macro{pipeline="text"} < 0.75
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "F1-macro du modèle texte sous 0,75"
+          description: "F1-macro du modèle en production : {{ $value }} (seuil de docs/STRATEGIE_REENTRAINEMENT.md)."
+
+      - alert: ModelTooOld
+        expr: (time() - model_trained_timestamp_seconds) / 86400 > 30
+        labels:
+          severity: info
+        annotations:
+          summary: "Modèle texte entraîné il y a plus de 30 jours"
+          description: "Âge du modèle : {{ $value | printf \"%.0f\" }} jours. Le scheduler devrait relancer un entraînement."

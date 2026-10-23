@@ -58,7 +58,8 @@ Datascientest_projets/
 ├── pipelines/              # Pipeline ZenML (preprocess_data → train_model → promote_model)
 ├── scripts/                # Étapes : collecte, process, training, promote, predict
 ├── docs/                   # Stratégie de réentraînement
-├── monitoring/             # Prometheus + Grafana (provisioning)
+├── monitoring/             # Prometheus (+ alertes) + Grafana (provisioning)
+├── tests/                  # Tests pytest (API, sécurité, promotion, scheduler)
 ├── models/                 # Modèles sauvegardés (générés)
 ├── artifacts/              # Métadonnées des runs (générées)
 ├── rendus/                 # Rapports et documentation
@@ -73,18 +74,19 @@ Datascientest_projets/
 
 Workspace de référence : **`Datascientest_projets`** (données + modèles locaux).
 
-Voir **[ARCHITECTURE.md](ARCHITECTURE.md)** (stack Docker) et **[docs/STRATEGIE_REENTRAINEMENT.md](docs/STRATEGIE_REENTRAINEMENT.md)** (candidat → promotion → rollback).
+Voir **[ARCHITECTURE.md](ARCHITECTURE.md)** (stack Docker, sécurité, alertes, tests, correspondance avec les 4 phases) et **[docs/STRATEGIE_REENTRAINEMENT.md](docs/STRATEGIE_REENTRAINEMENT.md)** (candidat → promotion → rollback).
 
 ```powershell
 # 1) Docker Desktop doit être démarré (icône baleine verte)
 .\make.ps1 up              # toute la stack
 .\make.ps1 train           # pipeline ZenML → promotion si meilleur → restart API
+.\make.ps1 test            # tests pytest
 .\make.ps1 down            # stop
 ```
 
 | Service | URL |
 |---------|-----|
-| FastAPI | http://localhost:8000/docs |
+| FastAPI | http://localhost:8000/docs (login `admin` / `rakuten`) |
 | Streamlit | http://localhost:8501 |
 | ZenML | http://localhost:8888 (`default` / `zenml`) |
 | MinIO | http://localhost:9001 (`minioadmin` / `minioadmin`) |

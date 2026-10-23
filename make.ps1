@@ -3,7 +3,7 @@ param(
     [Parameter(Position = 0)]
     [ValidateSet(
         "help", "install", "install-mlops", "api", "streamlit", "train", "train-local",
-        "promote", "up", "down", "logs", "health", "ps", "export-fusion"
+        "promote", "test", "up", "down", "logs", "health", "ps", "export-fusion"
     )]
     [string]$Target = "help"
 )
@@ -23,6 +23,7 @@ Targets:
   .\make.ps1 train          pipeline ZenML (Docker) : preprocess -> train -> promote
   .\make.ps1 train-local    sans Docker : collecte -> process -> training (candidat)
   .\make.ps1 promote        sans Docker : met le candidat en production s'il est meilleur
+  .\make.ps1 test           tests pytest (dans l'image de l'API)
   .\make.ps1 export-fusion  entraîne/exporte artefacts fusion (CLIP)
   .\make.ps1 down           stop containers
   .\make.ps1 logs           logs API
@@ -69,6 +70,11 @@ Targets:
         Write-Host "  MinIO       http://localhost:9001  (minioadmin / minioadmin)"
         Write-Host "  Prometheus  http://localhost:9092"
         Write-Host "  Grafana     http://localhost:3002  (admin / rakuten)"
+        Write-Host ""
+        Write-Host "API protégée : login admin / mot de passe rakuten (API_USERNAME / API_PASSWORD)"
+    }
+    "test" {
+        docker compose run --rm --no-deps api pytest -q
     }
     "export-fusion" {
         $env:FUSION_MAX_ROWS = if ($env:FUSION_MAX_ROWS) { $env:FUSION_MAX_ROWS } else { "4000" }
