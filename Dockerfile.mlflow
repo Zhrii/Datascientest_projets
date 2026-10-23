@@ -1,0 +1,21 @@
+# Container "mlflow" : le serveur qui garde l'historique des entraînements
+FROM python:3.12-slim
+
+WORKDIR /mlflow
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    MLFLOW_DISABLE_TELEMETRY=true
+
+COPY requirements-mlflow.txt .
+RUN pip install --no-cache-dir -r requirements-mlflow.txt
+
+EXPOSE 5000
+
+# tout est rangé dans /mlflow/data (le volume "mlflow_data")
+# --allowed-hosts : sans "mlflow" dans la liste, MLflow refuse (erreur 403) les demandes qui viennent des autres containers
+CMD ["mlflow", "server", \
+     "--host", "0.0.0.0", "--port", "5000", \
+     "--backend-store-uri", "sqlite:////mlflow/data/mlflow.db", \
+     "--artifacts-destination", "/mlflow/data/artifacts", \
+     "--allowed-hosts", "mlflow,mlflow:5000,localhost,localhost:5000,127.0.0.1,127.0.0.1:5000"]

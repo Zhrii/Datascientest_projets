@@ -1,25 +1,35 @@
-# Build context exclusions — keep image lean
-.git
+# Ce qui est listé ici n'est pas envoyé à Docker pendant le build
+# (sinon le build est très lent et les images énormes)
+venv/
+.venv/
+.git/
+.github/
 .gitattributes
 .gitignore
 **/__pycache__
 **/*.pyc
 **/.ipynb_checkpoints
-notebooks
-rendus
-*.md
-!ARCHITECTURE.md
-venv
-.venv
-mlruns
-artifacts
-data/processed/image_train
-**/image_train/**
+.env
+.cursor
+agent-transcripts
+
+# données, modèles et notebooks : jamais dans l'image
+# (ils sont branchés au lancement, voir docker-compose.yml)
+data/
+data brut/
+models/
+notebooks/
+images/
+rendus/
+docs/
+artifacts/
+mlruns/
+*.csv
+*.pkl
+*.joblib
 *.npz
 *.pt
 *.pth
-clip_features_cache*.npz
-val_df_multimodal_lite.csv
+*.zip
+*.md
 IMG-*
-.cursor
-agent-transcripts

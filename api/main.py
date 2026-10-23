@@ -1,18 +1,20 @@
 """
-API d'inférence FastAPI — couche Inference du schéma ZenML.
+API d'inférence FastAPI — couche Inference de la stack MLOps.
 
 Endpoints :
   POST /predict      — classification texte / image / fusion
   GET  /health       — santé API + modèles
   GET  /model/info   — métadonnées des pipelines
-  POST /retrain      — déclenche le pipeline d'entraînement (async)
+  POST /retrain      — entraîne un candidat puis le promeut s'il est meilleur (async)
   GET  /metrics      — métriques Prometheus
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import os
 import sys
 import time
 from contextlib import asynccontextmanager
@@ -188,30 +190,41 @@ async def predict(
     )
 
 
+MODELS_DIR = Path(os.getenv("MODELS_DIR", str(ROOT / "models")))
+PIPELINE_SCRIPT = ROOT / "pipelines" / "rakuten_pipeline.py"
+
+
+def _run_id(metrics_json: Path) -> Optional[str]:
+    try:
+        return json.loads(metrics_json.read_text(encoding="utf-8")).get("mlflow_run_id")
+    except (OSError, ValueError):
+        return None
+
+
 async def _run_retrain() -> None:
     global _last_retrain
     RETRAIN_RUNNING.set(1)
-    _last_retrain = {"status": "running", "message": "Pipeline en cours"}
-    script = ROOT / "pipelines" / "train_pipeline.py"
+    _last_retrain = {"status": "running", "message": "Pipeline ZenML en cours"}
     try:
         proc = await asyncio.create_subprocess_exec(
             sys.executable,
-            str(script),
+            str(PIPELINE_SCRIPT),
             cwd=str(ROOT),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
         )
         stdout, _ = await proc.communicate()
         log = (stdout or b"").decode("utf-8", errors="replace")[-4000:]
-        if proc.returncode == 0:
-            _last_retrain = {"status": "success", "message": log or "OK"}
+        if proc.returncode != 0:
+            _last_retrain = {"status": "failed", "message": log or f"exit {proc.returncode}"}
+            return
+        # promu = le modèle de production est celui qui vient d'être entraîné
+        candidate_run = _run_id(MODELS_DIR / "candidate" / "metrics.json")
+        promoted = candidate_run is not None and candidate_run == _run_id(MODELS_DIR / "metrics.json")
+        if promoted:
             get_predictor().reload()
             _refresh_ready_gauges()
-        else:
-            _last_retrain = {
-                "status": "failed",
-                "message": log or f"exit {proc.returncode}",
-            }
+        _last_retrain = {"status": "promoted" if promoted else "rejected", "message": log}
     except Exception as exc:  # noqa: BLE001
         _last_retrain = {"status": "failed", "message": str(exc)}
         logger.exception("retrain failed")
@@ -221,7 +234,11 @@ async def _run_retrain() -> None:
 
 @app.post("/retrain")
 async def retrain():
-    """Déclenche le pipeline preprocess → train (non bloquant)."""
+    """Lance le pipeline ZenML preprocess_data → train_model → promote_model (non bloquant).
+
+    Le nouveau modèle n'est mis en production que s'il est au moins aussi
+    bon que l'actuel (scripts/promote_model.py) ; l'API le recharge alors.
+    """
     if _retrain_lock.locked() or _last_retrain.get("status") == "running":
         raise HTTPException(409, "Un retrain est déjà en cours")
 

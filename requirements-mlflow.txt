@@ -1,0 +1,2 @@
+# serveur MLflow (même version que dans le container d'entraînement)
+mlflow==3.16.1

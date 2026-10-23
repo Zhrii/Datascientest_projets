@@ -1,50 +1,64 @@
 # =============================================================================
-# Stack MLOps — alignée sur le schéma Architecture Overview
+# Stack MLOps Rakuten — calquée sur le schéma "Architecture Overview"
 #
-# Ports (hôte) :
-#   FastAPI        :8000
-#   Streamlit      :8501
-#   ZenML Server   :8888
-#   Prometheus     :9092
-#   Grafana        :3002
-#   MLflow         :5000
-#   MinIO API      :9000  / console :9001
-#   MySQL          :3306
+#   Inference Layer
+#     api        : prédictions texte / image / fusion  -> http://localhost:8000/docs
+#     streamlit  : interface de démo (appelle l'API)   -> http://localhost:8501
+#   Pipeline Execution
+#     train      : Pipeline Runner ZenML (profil "jobs")
+#                  preprocess_data -> train_model -> promote_model
+#   ZenML Platform
+#     zenml      : suivi des pipelines                 -> http://localhost:8888
+#   Storage Layer
+#     mysql      : métadonnées ZenML
+#     minio      : artefacts S3 (ZenML + MLflow)       -> http://localhost:9001
+#     mlflow     : expériences + Model Registry        -> http://localhost:5000
+#   Monitoring
+#     prometheus : collecte les métriques de l'API     -> http://localhost:9092
+#     grafana    : tableaux de bord                    -> http://localhost:3002
 #
-# Démarrage :
 #   docker compose up -d --build
-#   docker compose run --rm train    # make train
+#   docker compose run --rm train          (= make train)
 # =============================================================================
 
+x-s3: &s3-env
+  AWS_ACCESS_KEY_ID: minioadmin
+  AWS_SECRET_ACCESS_KEY: minioadmin
+  MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+
+x-zenml-client: &zenml-client-env
+  ZENML_STORE_URL: http://zenml:8080
+  ZENML_STORE_USERNAME: default
+  ZENML_STORE_PASSWORD: zenml
+  ZENML_ANALYTICS_OPT_IN: "false"
+  ZENML_CONFIG_PATH: /app/.zenml
+
 services:
-  # ---- Inference Layer (FastAPI) ----
+  # ---- Inference Layer ----
   api:
     build:
       context: .
-      dockerfile: Dockerfile
-    image: rakuten-app:latest
+      dockerfile: Dockerfile.api
+    image: rakuten-api:latest
     container_name: rakuten-api
-    command: uvicorn api.main:app --host 0.0.0.0 --port 8000
     ports:
       - "8000:8000"
     environment:
+      <<: [*s3-env, *zenml-client-env]
       MODELS_DIR: /app/models
+      DATA_BRUT_DIR: /app/data_brut
       MLFLOW_TRACKING_URI: http://mlflow:5000
-      TRAIN_MAX_ROWS: ${TRAIN_MAX_ROWS:-15000}
       HF_HOME: /app/.cache/huggingface
     volumes:
+      # écriture nécessaire pour POST /retrain (candidat + promotion)
       - ./models:/app/models
-      - ./artifacts:/app/artifacts
-      - "./data brut:/app/data brut"
+      - ./artifacts:/app/artifacts:ro
+      - "./data brut:/app/data_brut:ro"
       - ./data:/app/data
       - hf_cache:/app/.cache/huggingface
     depends_on:
       mlflow:
-        condition: service_started
-      minio:
-        condition: service_started
-    networks:
-      - rakuten
+        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -53,12 +67,8 @@ services:
       retries: 5
       start_period: 180s
 
-  # ---- UI (client API) ----
   streamlit:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: rakuten-app:latest
+    image: rakuten-api:latest
     container_name: rakuten-streamlit
     command: streamlit run app.py --server.port=8501 --server.address=0.0.0.0 --browser.gatherUsageStats=false
     ports:
@@ -67,58 +77,77 @@ services:
       API_URL: http://api:8000
       MODELS_DIR: /app/models
     volumes:
-      - ./models:/app/models
-      - ./images:/app/images
+      - ./models:/app/models:ro
+      - ./images:/app/images:ro
     depends_on:
       api:
         condition: service_healthy
-    networks:
-      - rakuten
     restart: unless-stopped
 
   # ---- Pipeline Execution (make train) ----
   train:
     build:
       context: .
-      dockerfile: Dockerfile
-    image: rakuten-app:latest
-    container_name: rakuten-train
-    profiles: ["train"]
-    command: python pipelines/train_pipeline.py
+      dockerfile: Dockerfile.training
+    image: rakuten-training:latest
+    profiles: ["jobs"]                # pas lancé par "docker compose up"
     environment:
-      MODELS_DIR: /app/models
+      <<: [*s3-env, *zenml-client-env]
       MLFLOW_TRACKING_URI: http://mlflow:5000
-      TRAIN_MAX_ROWS: ${TRAIN_MAX_ROWS:-15000}
     volumes:
-      - ./models:/app/models
-      - ./artifacts:/app/artifacts
-      - "./data brut:/app/data brut"
+      - "./data brut:/app/data_brut:ro"   # données de départ (lecture seule)
       - ./data:/app/data
+      - ./models:/app/models
     depends_on:
-      - mlflow
-      - minio
-    networks:
-      - rakuten
+      mlflow:
+        condition: service_healthy
+      zenml:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
 
-  # ---- Storage : MLflow Experiments ----
-  mlflow:
-    image: ghcr.io/mlflow/mlflow:v2.14.1
-    container_name: rakuten-mlflow
-    command: >
-      mlflow server
-      --host 0.0.0.0
-      --port 5000
-      --backend-store-uri sqlite:///mlflow/mlflow.db
-      --default-artifact-root /mlflow/artifacts
+  # ---- ZenML Platform ----
+  zenml:
+    image: zenmldocker/zenml-server:0.98.0
+    container_name: rakuten-zenml
     ports:
-      - "5000:5000"
-    volumes:
-      - mlflow_data:/mlflow
-    networks:
-      - rakuten
+      - "8888:8080"
+    environment:
+      ZENML_STORE_URL: mysql://zenml:zenml@mysql:3306/zenml
+      ZENML_SERVER_AUTO_ACTIVATE: "1"
+      ZENML_DEFAULT_USER_NAME: default
+      ZENML_DEFAULT_USER_PASSWORD: zenml
+      ZENML_ANALYTICS_OPT_IN: "false"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
     restart: unless-stopped
 
-  # ---- Storage : MinIO S3 Artifact Store ----
+  # ---- Storage Layer ----
+  mysql:
+    image: mysql:8.0
+    container_name: rakuten-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: zenml
+      MYSQL_DATABASE: zenml
+      MYSQL_USER: zenml
+      MYSQL_PASSWORD: zenml
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uzenml", "-pzenml"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+    restart: unless-stopped
+
   minio:
     image: minio/minio:RELEASE.2024-07-16T23-46-41Z
     container_name: rakuten-minio
@@ -131,83 +160,57 @@ services:
       MINIO_ROOT_PASSWORD: minioadmin
     volumes:
       - minio_data:/data
-    networks:
-      - rakuten
-    restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 10s
+    restart: unless-stopped
 
-  # Crée le bucket artefacts au démarrage
+  # crée les buckets "mlflow" et "zenml" au démarrage
   minio-init:
     image: minio/mc:RELEASE.2024-07-31T15-58-33Z
     container_name: rakuten-minio-init
     depends_on:
-      - minio
+      minio:
+        condition: service_healthy
     entrypoint: >
       /bin/sh -c "
-      sleep 3;
-      mc alias set local http://minio:9000 minioadmin minioadmin;
-      mc mb -p local/mlflow || true;
-      mc mb -p local/zenml || true;
-      mc mb -p local/artifacts || true;
-      exit 0;
+      mc alias set local http://minio:9000 minioadmin minioadmin &&
+      mc mb -p local/mlflow &&
+      mc mb -p local/zenml
       "
-    networks:
-      - rakuten
 
-  # ---- Storage : MySQL (ZenML Metadata) ----
-  mysql:
-    image: mysql:8.0
-    container_name: rakuten-mysql
+  mlflow:
+    build:
+      context: .
+      dockerfile: Dockerfile.mlflow
+    container_name: rakuten-mlflow
     ports:
-      - "3306:3306"
+      - "5000:5000"
     environment:
-      MYSQL_ROOT_PASSWORD: zenml
-      MYSQL_DATABASE: zenml
-      MYSQL_USER: zenml
-      MYSQL_PASSWORD: zenml
+      <<: *s3-env
     volumes:
-      - mysql_data:/var/lib/mysql
-    networks:
-      - rakuten
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uzenml", "-pzenml"]
+      - mlflow_data:/mlflow/data      # runs, métriques, Model Registry
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+    healthcheck:                      # sert à savoir quand MLflow est prêt
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
       interval: 10s
       timeout: 5s
       retries: 10
-      start_period: 40s
-
-  # ---- ZenML Platform ----
-  zenml:
-    image: zenmldocker/zenml-server:0.67.0
-    container_name: rakuten-zenml
-    ports:
-      - "8888:8080"
-    environment:
-      ZENML_STORE_URL: mysql://zenml:zenml@mysql:3306/zenml
-      ZENML_DEFAULT_USER_NAME: default
-      ZENML_DEFAULT_USER_PASSWORD: zenml
-      ZENML_SERVER_DEPLOYMENT_TYPE: docker
-    depends_on:
-      mysql:
-        condition: service_healthy
-    networks:
-      - rakuten
+      start_period: 20s
     restart: unless-stopped
 
-  # ---- Monitoring : Prometheus (schéma :9092) ----
+  # ---- Monitoring ----
   prometheus:
     image: prom/prometheus:v2.53.0
     container_name: rakuten-prometheus
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
-      - --web.listen-address=0.0.0.0:9090
     ports:
       - "9092:9090"
     volumes:
@@ -215,11 +218,8 @@ services:
       - prometheus_data:/prometheus
     depends_on:
       - api
-    networks:
-      - rakuten
     restart: unless-stopped
 
-  # ---- Monitoring : Grafana (schéma :3002) ----
   grafana:
     image: grafana/grafana:11.1.0
     container_name: rakuten-grafana
@@ -235,18 +235,12 @@ services:
       - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
     depends_on:
       - prometheus
-    networks:
-      - rakuten
     restart: unless-stopped
-
-networks:
-  rakuten:
-    driver: bridge
 
 volumes:
   mlflow_data:
   minio_data:
   mysql_data:
-  grafana_data:
   prometheus_data:
+  grafana_data:
   hf_cache:
