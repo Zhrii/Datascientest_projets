@@ -1,0 +1,25 @@
+# Build context exclusions — keep image lean
+.git
+.gitattributes
+.gitignore
+**/__pycache__
+**/*.pyc
+**/.ipynb_checkpoints
+notebooks
+rendus
+*.md
+!ARCHITECTURE.md
+venv
+.venv
+mlruns
+artifacts
+data/processed/image_train
+**/image_train/**
+*.npz
+*.pt
+*.pth
+clip_features_cache*.npz
+val_df_multimodal_lite.csv
+IMG-*
+.cursor
+agent-transcripts

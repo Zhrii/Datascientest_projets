@@ -42,38 +42,61 @@ Les données sont dans le dossier `data brut/` :
 Datascientest_projets/
 ├── data brut/              # Données brutes (CSV, non versionnées)
 ├── data/processed/         # Données nettoyées + images (image_train/)
-├── notebooks/              # Analyse et entraînement
-│   ├── 01_texte_exploration_donnees.ipynb   # Section texte : exploration
-│   ├── 02_texte_traitement_donnees.ipynb    # Section texte : preprocessing
-│   ├── 03_texte_resultats_traitement.ipynb  # Section texte : validation
-│   ├── 04_texte_modelisation_baseline.ipynb
-│   ├── 05_texte_optimisation_modeles.ipynb
-│   ├── 06_texte_modelisation_avancee.ipynb
-│   ├── 07_exploration_images_classic.ipynb
-│   └── 08_matching_texte_image.ipynb
+├── notebooks/              # 01–06 texte · 07–11 image · 12 fusion multimodale
 ├── src/                    # Code modulaire
-│   ├── preprocessing/     # Nettoyage texte, pipeline
+│   ├── preprocessing/      # Nettoyage texte, pipeline
 │   ├── utils/              # Chargement données
 │   ├── modeling/           # Vectorisation, modèles baseline/avancés
-│   ├── evaluation/        # Métriques, rapports, matrices de confusion
-│   ├── optimization/      # Rééquilibrage, tuning
-│   ├── deep_learning/     # MLP, CNN, LSTM (TensorFlow/Keras)
-│   ├── interpretability/  # SHAP, feature importance
-│   └── multimodal/        # Matching texte-image (PyTorch)
-├── models/                 # Modèles sauvegardés, résultats (générés)
+│   ├── evaluation/         # Métriques, rapports, matrices de confusion
+│   ├── optimization/       # Rééquilibrage, tuning
+│   ├── deep_learning/      # MLP, CNN, LSTM (TensorFlow/Keras)
+│   ├── interpretability/   # SHAP, feature importance
+│   ├── image/              # Chargement images, extraction de features
+│   ├── multimodal/         # Matching texte-image (PyTorch)
+│   └── inference/          # Prédicteur partagé API / Streamlit
+├── api/                    # API FastAPI (inférence, /metrics, /retrain)
+├── pipelines/              # Pipeline d'entraînement + export fusion
+├── monitoring/             # Prometheus + Grafana (provisioning)
+├── models/                 # Modèles sauvegardés (générés)
+├── artifacts/              # Métadonnées des runs (générées)
 ├── rendus/                 # Rapports et documentation
-│   ├── reference_classes.md      # Référentiel des 27 classes (prdtypecode)
-│   ├── rapport_partie_texte.md   # Rapport classification textuelle
-│   ├── rapport_partie_image.md   # Rapport classification par images
-│   └── rapport_partie_fusion.md  # Rapport fusion multimodale
-├── class_identification.md
-├── PLAN_MATCHING_TEXTE_IMAGE.md   # Descriptif technique matching
-├── PROJET_STRUCTURE.md     # Vue détaillée de l’arborescence
-├── requirements.txt
-└── README.md
+├── app.py                  # Application Streamlit
+├── docker-compose.yml      # Stack MLOps complète
+└── make.ps1 / Makefile     # Commandes (up, train, api, ...)
 ```
 
-Pour le détail des fichiers et des rôles par étape, voir **PROJET_STRUCTURE.md**.
+---
+
+## 🏗️ Architecture MLOps
+
+Workspace de référence : **`Datascientest_projets`** (données + modèles locaux).
+
+Voir **[ARCHITECTURE.md](ARCHITECTURE.md)** — stack Docker alignée sur le schéma ZenML.
+
+```powershell
+# 1) Docker Desktop doit être démarré (icône baleine verte)
+.\make.ps1 up              # toute la stack du schéma
+.\make.ps1 train-docker    # pipeline preprocess → train
+.\make.ps1 down            # stop
+```
+
+| Service | URL |
+|---------|-----|
+| FastAPI | http://localhost:8000/docs |
+| Streamlit | http://localhost:8501 |
+| ZenML | http://localhost:8888 |
+| Prometheus | http://localhost:9092 |
+| Grafana | http://localhost:3002 (`admin` / `rakuten`) |
+| MLflow | http://localhost:5000 |
+| MinIO | http://localhost:9001 |
+
+Sans Docker (API seule) :
+
+```powershell
+.\make.ps1 install-mlops
+.\make.ps1 api
+.\make.ps1 streamlit
+```
 
 ---
 
@@ -143,17 +166,11 @@ Puis dans Jupyter : *Kernel → Change kernel → Python (projet_ecole)*.
 
 | Notebook | Contenu |
 |----------|--------|
-| **01** | Exploration des données texte, visualisations |
-| **02** | Préprocessing (HTML, normalisation), génération des jeux nettoyés |
-| **03** | Modélisation baseline (sklearn, CatBoost, etc.) |
-| **04** | Optimisation (poids de classes, SMOTE, etc.) |
-| **05** | Modèles avancés (ensembles, MLP/CNN/LSTM), interprétabilité (SHAP) |
-| **06** | Exploration et classification par images (CNN) |
-| **07** | **Matching texte-image** : Dual Encoder, loss contrastive, Recall@K |
-| **08** | Suivi des tâches du projet matching |
-
-- **Classification (texte)** : enchaînement logique 01 → 02 → 03 → 04 → 05 (données dans `data/processed/`).
-- **Matching texte-image** : 07 (et 08 pour le suivi). Données : CSV dans `data brut/`, images dans `data/processed/image_train/`. Détails techniques dans **PLAN_MATCHING_TEXTE_IMAGE.md**.
+| **01–03** | Texte : exploration, preprocessing (HTML, normalisation), validation |
+| **04–06** | Texte : baseline, optimisation, modèles avancés + interprétabilité |
+| **07–08** | Image : exploration, preprocessing |
+| **09–11** | Image : baseline (ResNet50), optimisation, modèles avancés (CLIP, EfficientNet) |
+| **12** | Fusion multimodale texte + image (TF-IDF + CLIP + SVM, F1-macro ≈ 0,84) |
 
 ---
 
@@ -172,13 +189,11 @@ Liste complète : `requirements.txt`.
 ## 📄 Documentation
 
 - **README.md** (ce fichier) : vue d’ensemble et démarrage.
-- **PROJET_STRUCTURE.md** : arborescence détaillée et fichiers par étape.
-- **PLAN_MATCHING_TEXTE_IMAGE.md** : objectifs, architecture Dual Encoder, choix des librairies, implémentation, métriques (Recall@K), pour le rendu matching.
-- **rendus/** : rapports et référentiels
+- **ARCHITECTURE.md** : stack MLOps (services Docker, ports, commandes).
+- **rendus/** : rapports et référentiels (voir `rendus/README.md`)
   - `reference_classes.md` : référentiel des 27 classes produits (prdtypecode)
-  - `rapport_partie_texte.md` : rapport classification textuelle
-  - `rapport_partie_image.md` : rapport classification par images
-  - `rapport_partie_fusion.md` : rapport fusion multimodale
+  - `rapport_partie_texte.md` / `rapport_partie_image.md` / `rapport_partie_fusion.md`
+  - `resume_mlops.md` : synthèse de la phase MLOps
 
 ---
 
@@ -194,7 +209,8 @@ Liste complète : `requirements.txt`.
 
 - Exploration et préprocessing documentés (notebooks 01–02, rapports dans `rendus/`).
 - Pipeline de classification texte (baseline → optimisation → modèles avancés) avec métriques et interprétabilité.
-- Module de matching texte-image (Dual Encoder, entraînement, évaluation Recall@K, sauvegarde du meilleur modèle) avec descriptif technique dans **PLAN_MATCHING_TEXTE_IMAGE.md**.
+- Fusion multimodale texte + image (notebook 12, rapport `rendus/rapport_partie_fusion.md`).
+- Industrialisation MLOps : API, pipeline, monitoring, tracking (voir **ARCHITECTURE.md**).
 
 ---
 

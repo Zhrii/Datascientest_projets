@@ -10,6 +10,8 @@ Ce dossier contient les rapports détaillés et le référentiel du projet de cl
 | **rapport_partie_texte.md** | Rapport détaillé de la partie classification textuelle : méthodologie, résultats chiffrés, métriques, glossaire |
 | **rapport_partie_image.md** | Rapport détaillé de la partie classification par images : ResNet50, CLIP, EfficientNet, résultats par classe |
 | **rapport_partie_fusion.md** | Rapport détaillé de la fusion multimodale : late fusion, CLIP, matching, Recall@K |
+| **resume_mlops.md** | Synthèse de la phase MLOps : ce qui a été mis en place, pourquoi, comment démarrer, limites |
+| **checklist_demo_mlops.md** | Script de démo live (Streamlit → API → Grafana) |
 
 ## Pour les rédacteurs du rapport final
 

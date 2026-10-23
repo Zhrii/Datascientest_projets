@@ -108,3 +108,7 @@ _dump_*_out.txt
 clip_features_cache.npz
 images/
 temp_image.jpg
+
+# Archives et métadonnées de runs (régénérées par les pipelines)
+*.zip
+artifacts/

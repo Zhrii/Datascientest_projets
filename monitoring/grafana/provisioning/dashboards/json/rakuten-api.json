@@ -1,0 +1,104 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "title": "Requêtes /predict",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "id": 1,
+      "targets": [
+        {
+          "expr": "sum by (modality, status) (rate(predict_requests_total[1m]))",
+          "legendFormat": "{{modality}} / {{status}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "reqps" }
+      }
+    },
+    {
+      "title": "Latence /predict (p95)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "id": 2,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, modality) (rate(predict_latency_seconds_bucket[5m])))",
+          "legendFormat": "p95 {{modality}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "s" }
+      }
+    },
+    {
+      "title": "Modèles prêts",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 8 },
+      "id": 3,
+      "targets": [
+        {
+          "expr": "model_ready",
+          "legendFormat": "{{pipeline}}",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background",
+        "graphMode": "none"
+      }
+    },
+    {
+      "title": "Retrain en cours",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 8 },
+      "id": 4,
+      "targets": [
+        {
+          "expr": "retrain_running",
+          "legendFormat": "retrain",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background",
+        "graphMode": "none"
+      }
+    },
+    {
+      "title": "Total prédictions",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 8 },
+      "id": 5,
+      "targets": [
+        {
+          "expr": "sum(predict_requests_total)",
+          "legendFormat": "total",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "value",
+        "graphMode": "area"
+      }
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["rakuten", "mlops"],
+  "templating": { "list": [] },
+  "time": { "from": "now-1h", "to": "now" },
+  "timezone": "browser",
+  "title": "Rakuten Inference API",
+  "uid": "rakuten-api",
+  "version": 1
+}
