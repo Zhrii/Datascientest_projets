@@ -2,7 +2,7 @@
 
 ## 📋 Contexte du Projet
 
-Ce projet développe un système de **classification automatique** et de **matching multimodale** pour un catalogue e-commerce. Il vise à :
+Ce projet développe un système de **classification automatique** et de **matching multimodale** pour un catalogue e-commerce. Il vise à : 
 
 1. **Prédire le code type de produit** (`prdtypecode`, 27 classes) à partir du **texte** (désignation + description).
 2. **Associer textes et images** : recherche par similarité (texte → image, image → texte) via un modèle Dual Encoder entraîné sur les paires produit.
