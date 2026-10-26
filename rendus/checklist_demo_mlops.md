@@ -10,7 +10,7 @@ cd "F:\Projets\Projet ecole\Datascientest_projets"
 .\make.ps1 up              # attendre ~3 min (chaque réplique de l'API charge CLIP / ResNet)
 docker compose ps          # tout Up / healthy (minio-init : Exited (0), normal)
 .\make.ps1 health          # text_ready / image_ready / fusion_ready = true
-.\make.ps1 test            # 57 tests verts
+.\make.ps1 test            # 73 tests verts
 ```
 
 Si aucun modèle texte n'est encore dans le Model Registry : `.\make.ps1 train` (≈ 1 min 30).
@@ -46,6 +46,14 @@ Onglets prêts dans le navigateur :
 - **Dérive** : page 8, **Simuler une dérive** (250 produits courts, en anglais, pleins de chiffres) → à la prochaine analyse (≤ 2 min) : **🔴 Dérive détectée**, rapport Evidently dans l'expander
 - Message clé : *on surveille aussi les données, pas seulement le service*
 
+### 3 bis. Le modèle en production : confiance et F1 réel (≈ 1 min 30) — Phase 4
+- Page **4. Assistant Texte** : un produit clair (« Piscine tubulaire ronde 3m avec pompe ») → confiance élevée ; un texte vague (« truc ») → **⚠️ prédiction peu sûre**
+- Sous la prédiction : **Retour modérateur** → choisir la vraie catégorie → *Envoyer le retour*
+- Page 8, section *Performance du modèle en production* :
+  - **Simuler 300 retours de modérateurs** → F1 en production ≈ 0,8, et prédictions sûres justes à ≈ 90 % contre ≈ 50 % pour les peu sûres
+  - **Simuler 300 fiches produit bâclées** → F1 ≈ 0,5 ; Grafana : `ProductionF1Low`, `LowConfidenceSpike`, `DataDrift`
+- Message clé : *le F1 d'entraînement ne dit rien de la production ; on le mesure grâce aux retours des modérateurs, et la confiance dit lesquels vérifier en priorité*
+
 ### 4. Pipeline de réentraînement (≈ 1 min 30) — Phases 2 et 3
 - ZenML : run `rakuten_training_pipeline` → `collect_data` → `validate_data` → `preprocess_data` → `train_model` → `promote_model`
 - MLflow *Models* : `rakuten-text-svm`, alias **production**
@@ -56,11 +64,11 @@ Onglets prêts dans le navigateur :
 ### 5. Monitoring et alertes (≈ 1 min) — Phase 4
 - Grafana : requêtes, latence p95, **requêtes refusées (401 / 403 / 429)**, F1, âge du modèle, **répliques en service**, **dérive des données**
 - Panneau **Alertes actives** : après les étapes 2 et 3, **RateLimitHit**, **DataDrift** (et AuthFailures / ForbiddenAccess si on a insisté)
-- Prometheus `/alerts` : les 12 règles
+- Prometheus `/alerts` : les 14 règles
 - Message clé : *on surveille le service et les données en production, pas seulement le F1 du notebook*
 
 ### 6. Qualité du code (≈ 20 s)
-- Onglet *Actions* de GitHub : 57 tests lancés à chaque push (CI)
+- Onglet *Actions* de GitHub : 73 tests lancés à chaque push (CI)
 
 ## Phrase de conclusion
 

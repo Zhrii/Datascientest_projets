@@ -31,6 +31,16 @@ DEFAULT_MODELS_DIR = Path(os.getenv("MODELS_DIR", PROJECT_ROOT / "models"))
 ARTIFACTS_DIR = PROJECT_ROOT / "artifacts"
 HF_REPO = os.getenv("HF_REPO", "nicolasN2215/ecommerce-resnet-image")
 REGISTERED_TEXT_MODEL = "rakuten-text-svm"  # cf. scripts/training.py
+
+# Confiance d'une prédiction = marge entre le meilleur score et le deuxième
+# (marge de décision du SVM pour texte / fusion, écart de probabilité pour l'image).
+# Sous ce seuil, la prédiction est "peu sûre" : à faire vérifier par un modérateur.
+# Seuils calibrés sur les produits mis de côté (scripts/holdout.py, scripts/calibrate_confidence.py) :
+# en dessous, le modèle a raison moins d'une fois sur deux.
+#   texte  : 21 % de prédictions peu sûres (accuracy 42 %) ; les sûres : 89 %
+#   fusion : 16 % (accuracy 37 %) ; les sûres : 86 %
+#   image  : 62 % (accuracy 42 %) ; les sûres : 82 %  (modèle image faible : 57 % d'accuracy)
+LOW_CONFIDENCE_MARGIN = {"text": 0.387, "fusion": 0.281, "image": 2.463}
 PRODUCTION_ALIAS = "production"             # posé par scripts/promote_model.py
 
 # F1-macro de référence (notebooks, jeu complet). Remplacés par les valeurs
@@ -153,6 +163,16 @@ def _download_production_text_model() -> Optional[Tuple[Path, Dict[str, Any]]]:
     except Exception as exc:  # noqa: BLE001
         logger.warning("Model Registry indisponible, fallback fichiers locaux: %s", exc)
         return None
+
+
+def confidence_margin(model, X) -> Tuple[Any, float]:
+    """(classe prédite, marge entre les deux meilleurs scores) pour un seul exemple."""
+    if hasattr(model, "decision_function"):
+        scores = np.asarray(model.decision_function(X))[0]
+    else:
+        scores = np.asarray(model.predict_proba(X))[0]
+    top2 = np.argsort(scores)[-2:]
+    return model.classes_[top2[1]], float(scores[top2[1]] - scores[top2[0]])
 
 
 def production_text_version() -> Optional[str]:
@@ -317,7 +337,7 @@ class ProductPredictor:
             return pred_interne
         return encoder.inverse_transform([pred_interne])[0]
 
-    def _result(self, code, modality: str) -> Dict[str, Any]:
+    def _result(self, code, modality: str, confidence: float) -> Dict[str, Any]:
         meta = self.meta[modality]
         return {
             "prdtypecode": int(code) if str(code).isdigit() else code,
@@ -325,6 +345,8 @@ class ProductPredictor:
             "modality": modality,
             "model": meta["name"],
             "f1_macro": meta["f1_macro"],
+            "confidence": round(confidence, 4),
+            "low_confidence": confidence < LOW_CONFIDENCE_MARGIN[modality],
         }
 
     # ------------------------------------------------------------------ predict
@@ -333,9 +355,9 @@ class ProductPredictor:
             raise RuntimeError(self._errors.get("text", "Pipeline texte indisponible"))
         cleaned = self._preprocess_text(text)
         X = self._text["vectorizer"].transform(pd.Series([cleaned]))
-        pred = self._text["model"].predict(X)[0]
+        pred, margin = confidence_margin(self._text["model"], X)
         code = self._decode(self._text["encoder"], pred)
-        return self._result(code, "text")
+        return self._result(code, "text", margin)
 
     def predict_image(self, image: Union[Image.Image, str, Path, bytes]) -> Dict[str, Any]:
         if not self.image_ready:
@@ -346,9 +368,9 @@ class ProductPredictor:
             temp_path = tmp.name
         try:
             features = self._image["extractor"].extract_from_paths([temp_path])
-            pred = self._image["model"].predict(features)[0]
+            pred, margin = confidence_margin(self._image["model"], features)
             code = self._decode(self._image.get("encoder"), pred)
-            return self._result(code, "image")
+            return self._result(code, "image", margin)
         finally:
             try:
                 os.unlink(temp_path)
@@ -381,9 +403,9 @@ class ProductPredictor:
         clip_txt = (clip_txt / clip_txt.norm(dim=-1, keepdim=True)).cpu().numpy().astype(np.float32)
 
         X_fusion = sk_normalize(np.hstack([X_tfidf_norm, clip_img, clip_txt]))
-        pred = self._fusion["svm"].predict(X_fusion)[0]
+        pred, margin = confidence_margin(self._fusion["svm"], X_fusion)
         code = self._decode(self._fusion["encoder"], pred)
-        return self._result(code, "fusion")
+        return self._result(code, "fusion", margin)
 
     def predict(
         self,

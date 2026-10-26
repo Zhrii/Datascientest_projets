@@ -15,6 +15,8 @@ Pour lancer :
     python scripts/promote_model.py --min-gain 0.002   # exige +0,2 point de F1
     python scripts/promote_model.py --dry-run          # simule, ne change rien
     python scripts/promote_model.py --force            # promeut quoi qu'il arrive
+    python scripts/promote_model.py --holdout data/holdout/holdout.csv
+        # compare les deux modèles sur les MÊMES produits mis de côté (recommandé)
 """
 import argparse
 import json
@@ -109,6 +111,8 @@ def main(argv=None):
                         help="gain minimal de F1 exigé (0 = on accepte l'égalité)")
     parser.add_argument("--dry-run", action="store_true", help="simule, ne change rien")
     parser.add_argument("--force", action="store_true", help="promeut sans comparer")
+    parser.add_argument("--holdout", default=None,
+                        help="CSV de produits mis de côté : les deux modèles y sont notés (comparaison équitable)")
     args = parser.parse_args(argv)
 
     candidate_dir = Path(args.candidate_dir)
@@ -124,15 +128,32 @@ def main(argv=None):
     # 2) on lit les scores
     candidate = load_info(candidate_dir)
     production = load_info(production_dir)
+    metric = METRIC
     cand_score = candidate[METRIC]
-    print(f"📦 Candidat   : {METRIC} = {cand_score:.4f}  (entraîné le {candidate.get('trained_at', '?')})")
+    prod_score = None if production is None else production[METRIC]
 
-    if production is None:
-        prod_score = None
-        print("📦 Production : pas de metrics.json (premier passage), donc pas de score de référence")
+    # 2b) mieux : noter les deux modèles maintenant, sur les mêmes produits mis de côté
+    #     (sinon chacun a été évalué sur sa propre validation, tirée au hasard)
+    extra_info = {}
+    if args.holdout and Path(args.holdout).exists():
+        try:  # importé par le pipeline ZenML (scripts.promote_model) ou lancé en script
+            from scripts.holdout import evaluate_on_holdout
+        except ImportError:
+            from holdout import evaluate_on_holdout
+
+        metric = f"{METRIC} (holdout)"
+        cand_eval = evaluate_on_holdout(candidate_dir, args.holdout)
+        cand_score = cand_eval["f1_macro"]
+        extra_info["f1_macro_holdout"] = cand_score
+        if production is not None and not missing_files(production_dir):
+            prod_score = evaluate_on_holdout(production_dir, args.holdout)["f1_macro"]
+        print(f"🧪 Comparaison sur {cand_eval['n']} produits mis de côté (jamais vus à l'entraînement)")
+
+    print(f"📦 Candidat   : {metric} = {cand_score:.4f}  (entraîné le {candidate.get('trained_at', '?')})")
+    if prod_score is None:
+        print("📦 Production : pas de score de référence (premier passage)")
     else:
-        prod_score = production[METRIC]
-        print(f"📦 Production : {METRIC} = {prod_score:.4f}  (entraîné le {production.get('trained_at', '?')})")
+        print(f"📦 Production : {metric} = {prod_score:.4f}  (entraîné le {production.get('trained_at', '?')})")
 
     run_id = candidate.get("mlflow_run_id")
     model_version = candidate.get("mlflow_model_version")
@@ -169,6 +190,8 @@ def main(argv=None):
     install_candidate(candidate_dir, production_dir, {
         "promoted_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "previous_f1_macro": prod_score,
+        "compared_on": metric,
+        **extra_info,
     })
     print(f"✅ Candidat PROMU en production ({reason}).")
     if archived:

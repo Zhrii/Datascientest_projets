@@ -196,6 +196,7 @@ Liste complète : `requirements.txt`.
 ## 📄 Documentation
 
 - **README.md** (ce fichier) : vue d’ensemble et démarrage.
+- **COMPTE_RENDU_PROJET.md** : compte rendu complet du projet (ce qui a été fait, pourquoi, où, chiffres, difficultés, limites) — point de départ pour le rapport et la soutenance.
 - **ARCHITECTURE.md** : stack MLOps (services Docker, ports, commandes).
 - **rendus/** : rapports et référentiels (voir `rendus/README.md`)
   - `reference_classes.md` : référentiel des 27 classes produits (prdtypecode)

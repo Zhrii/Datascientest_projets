@@ -2,11 +2,13 @@
 Pipeline ZenML d'entraînement (le "Pipeline Runner" du schéma d'architecture).
 
   1. collect_data    : CSV bruts -> table fusionnée + version des données (DVC)  (scripts/collecte.py)
+                       ; 3 % des produits mis de côté, jamais entraînés (scripts/holdout.py)
   2. validate_data   : contrôle qualité ; arrête le pipeline si les données sont cassées (scripts/validate_data.py)
   3. preprocess_data : nettoyage texte (scripts/process.py)
   4. train_model     : TF-IDF + SVM -> models/candidate, run MLflow (+ version des données
                        et rapport qualité), version dans le Model Registry
-  5. promote_model   : candidat >= production ? -> models/ + alias "production" (scripts/promote_model.py)
+  5. promote_model   : candidat >= production sur les produits mis de côté ?
+                       -> models/ + alias "production" (scripts/promote_model.py)
 
 Où vont les choses :
   - ZenML Server (MySQL)  : historique des runs, étapes, statuts
@@ -36,6 +38,7 @@ from zenml.enums import StackComponentType
 
 from scripts.collecte import collecter
 from scripts.data_version import data_version
+from scripts.holdout import split_holdout
 from scripts.process import process
 from scripts.promote_model import EXIT_PROMOTED, EXIT_REJECTED
 from scripts.promote_model import main as promote_main
@@ -47,6 +50,7 @@ MODELS_DIR = Path(os.getenv("MODELS_DIR", ROOT / "models"))
 CANDIDATE_DIR = MODELS_DIR / "candidate"
 MERGED_CSV = ROOT / "data" / "raw" / "merged.csv"
 PROCESSED_CSV = ROOT / "data" / "processed" / "processed_data.csv"
+HOLDOUT_CSV = ROOT / "data" / "holdout" / "holdout.csv"
 
 STACK_NAME = "rakuten"
 ARTIFACT_STORE_NAME = "minio"
@@ -55,9 +59,14 @@ ARTIFACT_STORE_NAME = "minio"
 # ----------------------------------------------------------------------------- steps
 @step
 def collect_data() -> Tuple[Annotated[pd.DataFrame, "raw_data"], Annotated[Dict[str, str], "data_version"]]:
-    """Fusionne X_train / Y_train et relève la version des données (empreintes DVC)."""
+    """Fusionne X_train / Y_train, met de côté les produits du holdout, relève la version des données."""
     collecter(DATA_BRUT_DIR, str(MERGED_CSV))
-    return pd.read_csv(MERGED_CSV), data_version(DATA_BRUT_DIR)
+    train, holdout = split_holdout(pd.read_csv(MERGED_CSV))
+    HOLDOUT_CSV.parent.mkdir(parents=True, exist_ok=True)
+    holdout.to_csv(HOLDOUT_CSV, index=False)
+    train.to_csv(MERGED_CSV, index=False)  # preprocess_data ne voit que les produits d'entraînement
+    print(f"{len(train):,} produits pour l'entraînement, {len(holdout):,} mis de côté (holdout)")
+    return train, data_version(DATA_BRUT_DIR)
 
 
 @step
@@ -100,6 +109,7 @@ def promote_model(candidate_metrics: Dict[str, Any]) -> Annotated[Dict[str, Any]
     code = promote_main([
         "--candidate-dir", str(CANDIDATE_DIR),
         "--production-dir", str(MODELS_DIR),
+        "--holdout", str(HOLDOUT_CSV),  # candidat et production notés sur les mêmes produits
     ])
     if code not in (EXIT_PROMOTED, EXIT_REJECTED):
         raise RuntimeError(f"promote_model a échoué (code {code})")

@@ -18,7 +18,7 @@
 #   Automatisation
 #     scheduler   : déclenche /retrain tout seul (modèle trop vieux, +10 % de données)
 #   Monitoring
-#     drift-monitor : dérive des données (Evidently)           -> reports/drift_report.html
+#     drift-monitor : dérive des données (Evidently) + F1 en production (retours /feedback)
 #     prometheus  : métriques + règles d'alerte                -> http://localhost:9092
 #     grafana     : tableaux de bord + alertes actives         -> http://localhost:3002
 #
@@ -132,10 +132,12 @@ services:
       API_URL: http://api-gateway:8000
       MODELS_DIR: /app/models
       REPORTS_DIR: /app/reports
+      HOLDOUT_CSV: /app/data/holdout/holdout.csv   # produits mis de côté (simulation des retours)
     volumes:
       - ./models:/app/models:ro
       - ./images:/app/images:ro
       - ./reports:/app/reports:ro
+      - ./data/holdout:/app/data/holdout:ro
     depends_on:
       api-gateway:
         condition: service_healthy
@@ -197,6 +199,8 @@ services:
       DRIFT_CHECK_SECONDS: ${DRIFT_CHECK_SECONDS:-120}
       DRIFT_WINDOW: ${DRIFT_WINDOW:-300}
       DRIFT_MIN_SAMPLES: ${DRIFT_MIN_SAMPLES:-200}
+      FEEDBACK_WINDOW: ${FEEDBACK_WINDOW:-500}           # F1 en production sur les 500 derniers retours
+      FEEDBACK_MIN_SAMPLES: ${FEEDBACK_MIN_SAMPLES:-100}
     volumes:
       - ./data:/app/data:ro
       - ./reports:/app/reports

@@ -102,7 +102,7 @@ Les CSV de `data brut/` sont suivis par **DVC** : Git ne garde que les fichiers 
 
 `collect_data` → `validate_data` → `preprocess_data` → `train_model` → `promote_model`, exécuté par le container `train` (`make train`) ou par l'API (`POST /retrain`). Chaque run est visible dans ZenML ; les données passées d'une étape à l'autre sont stockées dans MinIO.
 
-### 5.2 Tests (`tests/`, pytest — 57 tests)
+### 5.2 Tests (`tests/`, pytest — 73 tests)
 
 | Fichier | Ce qui est vérifié |
 |---------|--------------------|
@@ -155,13 +155,19 @@ Le container `scheduler` vérifie toutes les heures les déclencheurs de la stra
 - **Qualité** : l'étape `validate_data` du pipeline vérifie colonnes, 27 catégories, doublons, désignations vides et taille ; si un contrôle échoue, le pipeline s'arrête avant l'entraînement. Le rapport est enregistré dans MLflow.
 - **Dérive** : le container `drift-monitor` compare toutes les 2 minutes les 300 derniers produits reçus par l'API (journal dans Redis) à 5 000 produits d'entraînement, avec **Evidently** (distances de Wasserstein et Jensen-Shannon, seuils calibrés sur de vrais produits Rakuten) : longueur du texte, nombre de mots, part de chiffres, catégorie prédite. Résultat : métriques Prometheus, alerte `DataDrift`, rapport HTML affiché dans Streamlit.
 
+### 6.2 bis F1 en production et confiance du modèle
+
+- **Retours des modérateurs** : `POST /feedback` donne la vraie catégorie d'une prédiction ; le drift-monitor calcule le **F1 en production** sur les 500 derniers retours. Test réel : 0,823 sur des fiches normales, 0,478 avec des fiches bâclées (alertes `ProductionF1Low`, `LowConfidenceSpike`, `DataDrift`).
+- **Confiance** : marge entre les deux meilleurs scores, seuil calibré sur 2 476 produits mis de côté (texte : 21 % de prédictions peu sûres, justes à 42 % ; les sûres : 89 %).
+- **Holdout** : ces produits ne servent jamais à entraîner ; la promotion compare candidat et production dessus (comparaison équitable).
+
 ### 6.3 Dashboard Grafana *Rakuten Inference API*
 
-Requêtes, latence p95, modèles prêts, réentraînement en cours, total des prédictions, **requêtes refusées (401 / 403 / 429)**, **F1 des modèles**, **âge du modèle**, **répliques en service**, **dérive des données** (globale et par variable), **alertes actives**.
+Requêtes, latence p95, modèles prêts, réentraînement en cours, total des prédictions, **requêtes refusées (401 / 403 / 429)**, **F1 des modèles**, **âge du modèle**, **répliques en service**, **dérive des données** (globale et par variable), **F1 production vs entraînement**, **accuracy selon la confiance**, **prédictions peu sûres**, **alertes actives** (17 graphiques).
 
-### 6.4 Alertes (`monitoring/alerts.yml`, 12 règles)
+### 6.4 Alertes (`monitoring/alerts.yml`, 14 règles)
 
-ApiDown, ApiReplicaDown, ModelNotLoaded, HighErrorRate (> 10 %), HighLatency (p95 > 2 s), RateLimitHit, ForbiddenAccess, AuthFailures, ModelF1Low (< 0,75), ModelTooOld (> 30 jours), DataDrift, DriftMonitorDown. Visibles dans Prometheus (`/alerts`) et dans Grafana.
+ApiDown, ApiReplicaDown, ModelNotLoaded, HighErrorRate (> 10 %), HighLatency (p95 > 2 s), RateLimitHit, ForbiddenAccess, AuthFailures, ModelF1Low (< 0,75), **ProductionF1Low** (F1 en production < 0,75), **LowConfidenceSpike** (> 40 % de prédictions peu sûres), ModelTooOld (> 30 jours), DataDrift, DriftMonitorDown. Visibles dans Prometheus (`/alerts`) et dans Grafana.
 
 ### 6.5 Interface de présentation
 
@@ -201,7 +207,7 @@ cd "F:\Projets\Projet ecole\Datascientest_projets"
 | Réentraînement | seul le modèle **texte** est réentraîné ; image et fusion (CLIP / ResNet) restent des fichiers figés | GPU + pipeline dédié |
 | Fusion servie | export sur échantillon (F1 ≈ 0,74) ; F1 0,84 obtenu dans le notebook complet | export sur toutes les données |
 | Comparaison des modèles | pas de jeu de test fixe : chaque entraînement tire ses 20 % de validation dans les données du moment | jeu de test gelé |
-| Performance en production | le F1 n'est pas mesuré en production (il faudrait les vraies catégories des produits récents) ; on surveille la dérive des données à la place | retours des modérateurs |
+| Performance en production | le F1 en production dépend des retours des modérateurs (simulés dans la démo) ; une baisse alerte mais ne réentraîne pas | ajouter les retours aux données d'entraînement |
 | Dérive | variables simples (forme du texte, catégories) ; pas de dérive sémantique du vocabulaire | embeddings de texte (descripteurs Evidently) |
 | Versioning des données | stockage DVC = MinIO local à chaque poste ; images non versionnées | stockage S3 partagé (AWS, DagsHub) |
 | Alertes | pas d'Alertmanager : pas d'e-mail / Slack | Alertmanager |

@@ -2,7 +2,8 @@
 API d'inférence FastAPI — couche Inference de la stack MLOps.
 
 Endpoints (🔒 = login / mot de passe HTTP Basic, rôle entre crochets, voir api/security.py) :
-  POST /predict      🔒 [user]  classification texte / image / fusion (limite de requêtes par rôle)
+  POST /predict      🔒 [user]  classification texte / image / fusion + confiance (limite par rôle)
+  POST /feedback     🔒 [user]  vraie catégorie d'une prédiction (retour modérateur -> F1 en production)
   GET  /model/info   🔒 [admin] métadonnées des pipelines
   POST /retrain      🔒 [admin] pipeline ZenML, promotion si meilleur (limite RETRAIN_RATE_LIMIT)
   GET  /health                  santé API + modèles (public : healthcheck Docker)
@@ -46,7 +47,8 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from src import state  # noqa: E402
-from api.security import User, predict_limiter, require_role, retrain_limiter  # noqa: E402
+from api.security import User, feedback_limiter, predict_limiter, require_role, retrain_limiter  # noqa: E402
+from src.inference.categories import DICT_CATEGORIES  # noqa: E402
 from src.inference.predictor import ProductPredictor, production_text_version  # noqa: E402
 
 logging.basicConfig(level=logging.INFO)
@@ -71,6 +73,20 @@ PREDICT_LATENCY = Histogram(
     ["modality"],
     buckets=(0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30),
 )
+PREDICT_CONFIDENCE = Histogram(
+    "predict_confidence",
+    "Confiance des prédictions (marge entre les deux meilleurs scores)",
+    ["modality"],
+    buckets=(0.05, 0.1, 0.2, 0.3, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0),
+)
+LOW_CONFIDENCE = Counter(
+    "predict_low_confidence_total", "Prédictions peu sûres (marge sous le seuil calibré)", ["modality"]
+)
+FEEDBACK_COUNT = Counter("feedback_total", "Retours des modérateurs", ["modality", "correct"])
+for _modality in ("text", "image", "fusion"):
+    LOW_CONFIDENCE.labels(modality=_modality)
+    for _correct in ("true", "false"):
+        FEEDBACK_COUNT.labels(modality=_modality, correct=_correct)
 MODEL_READY = Gauge("model_ready", "Pipeline chargé (1/0)", ["pipeline"])
 RETRAIN_RUNNING = Gauge("retrain_running", "Retrain en cours sur cette réplique (1/0)")
 MODEL_F1 = Gauge("model_f1_macro", "F1-macro du modèle chargé", ["pipeline"])
@@ -166,11 +182,14 @@ async def add_instance_header(request: Request, call_next):
 
 
 class PredictResponse(BaseModel):
+    prediction_id: str = Field(..., description="À renvoyer dans POST /feedback avec la vraie catégorie")
     prdtypecode: int | str
     category: str
     modality: str
     model: str
     f1_macro: float
+    confidence: float = Field(..., description="Marge entre les deux meilleurs scores du modèle")
+    low_confidence: bool = Field(..., description="Prédiction peu sûre : à faire vérifier par un modérateur")
     fallback: Optional[str] = None
     latency_ms: float = Field(..., description="Latence serveur en ms")
     instance: str = Field(INSTANCE, description="Réplique de l'API qui a répondu")
@@ -246,17 +265,48 @@ async def predict(
     modality = result.get("modality", modality_hint)
     PREDICT_LATENCY.labels(modality=modality).observe(elapsed)
     PREDICT_COUNT.labels(modality=modality, status=status).inc()
-    state.log_prediction(text, result)  # pour la détection de dérive
+    PREDICT_CONFIDENCE.labels(modality=modality).observe(result["confidence"])
+    if result["low_confidence"]:
+        LOW_CONFIDENCE.labels(modality=modality).inc()
+    prediction_id = state.log_prediction(text, result)  # dérive + futur /feedback
 
     return PredictResponse(
+        prediction_id=prediction_id,
         prdtypecode=result["prdtypecode"],
         category=result["category"],
         modality=result["modality"],
         model=result["model"],
         f1_macro=result["f1_macro"],
+        confidence=result["confidence"],
+        low_confidence=result["low_confidence"],
         fallback=result.get("fallback"),
         latency_ms=round(elapsed * 1000, 2),
     )
+
+
+class FeedbackRequest(BaseModel):
+    prediction_id: str = Field(..., description="Identifiant renvoyé par POST /predict")
+    prdtypecode: int = Field(..., description="Vraie catégorie du produit (code Rakuten)")
+
+
+@app.post("/feedback")
+def feedback(body: FeedbackRequest, user: User = Depends(feedback_limiter.dependency("user"))):
+    """Retour d'un modérateur : la vraie catégorie d'un produit déjà prédit.
+
+    Les couples (prédit, vrai) servent à mesurer le F1 du modèle en production
+    (calculé par le drift-monitor sur les derniers retours).
+    """
+    if body.prdtypecode not in DICT_CATEGORIES:
+        raise HTTPException(400, f"Catégorie inconnue : {body.prdtypecode}")
+    try:
+        entry = state.record_feedback(body.prediction_id, body.prdtypecode)
+    except state.UnknownPrediction as exc:
+        raise HTTPException(404, "Prédiction inconnue ou expirée (7 jours)") from exc
+    except state.AlreadyLabeled as exc:
+        raise HTTPException(409, "Cette prédiction a déjà reçu un retour") from exc
+    correct = entry["predicted"] == entry["true"]
+    FEEDBACK_COUNT.labels(modality=entry["modality"], correct=str(correct).lower()).inc()
+    return {"status": "recorded", "correct": correct, **entry}
 
 
 def _run_id(metrics_json: Path) -> Optional[str]:
@@ -325,6 +375,6 @@ def root():
         "service": "Rakuten Classification API",
         "instance": INSTANCE,
         "docs": "/docs",
-        "endpoints": ["/predict", "/health", "/model/info", "/retrain", "/metrics"],
-        "auth": "HTTP Basic — rôle user : /predict ; rôle admin : + /model/info, /retrain",
+        "endpoints": ["/predict", "/feedback", "/health", "/model/info", "/retrain", "/metrics"],
+        "auth": "HTTP Basic — rôle user : /predict, /feedback ; rôle admin : + /model/info, /retrain",
     }

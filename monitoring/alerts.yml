@@ -80,13 +80,33 @@ groups:
   - name: rakuten-model
     rules:
       - alert: ModelF1Low
-        expr: model_f1_macro{pipeline="text"} < 0.75
+        expr: max(model_f1_macro{pipeline="text"}) < 0.75
         for: 5m
         labels:
           severity: warning
         annotations:
-          summary: "F1-macro du modèle texte sous 0,75"
-          description: "F1-macro du modèle en production : {{ $value }} (seuil de docs/STRATEGIE_REENTRAINEMENT.md)."
+          summary: "F1-macro d'entraînement du modèle texte sous 0,75"
+          description: "F1-macro mesuré à l'entraînement : {{ $value }} (seuil de docs/STRATEGIE_REENTRAINEMENT.md)."
+
+      - alert: ProductionF1Low
+        expr: model_production_f1_macro < 0.75 and model_production_feedback_samples >= 100
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "F1-macro en production sous 0,75"
+          description: "F1 mesuré sur les retours des modérateurs : {{ $value | printf \"%.3f\" }}. Le modèle se trompe plus qu'à l'entraînement : collecter les retours comme nouvelles données étiquetées et réentraîner."
+
+      - alert: LowConfidenceSpike
+        expr: |
+          sum(increase(predict_low_confidence_total{modality="text"}[15m]))
+            / sum(increase(predict_requests_total{modality="text",status="ok"}[15m])) > 0.40
+          and sum(increase(predict_requests_total{modality="text",status="ok"}[15m])) > 50
+        labels:
+          severity: warning
+        annotations:
+          summary: "Beaucoup de prédictions peu sûres"
+          description: "{{ $value | humanizePercentage }} des prédictions texte des 15 dernières minutes sont peu sûres (référence calibrée : 21 %). Produits inhabituels ? Voir la dérive."
 
       - alert: ModelTooOld
         expr: (time() - model_trained_timestamp_seconds) / 86400 > 30

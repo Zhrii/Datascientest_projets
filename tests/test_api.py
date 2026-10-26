@@ -29,8 +29,9 @@ class FakePredictor:
         if not text and image is None:
             raise ValueError("Fournir au moins un texte ou une image")
         modality = "fusion" if text and image else ("text" if text else "image")
+        confidence = 0.05 if text == "ambigu" else 0.9
         return {"prdtypecode": 1560, "category": "Mobilier", "modality": modality,
-                "model": "fake", "f1_macro": 0.78}
+                "model": "fake", "f1_macro": 0.78, "confidence": confidence, "low_confidence": confidence < 0.2}
 
     def reload(self):
         pass
@@ -149,3 +150,47 @@ def test_only_one_retrain_at_a_time(client, monkeypatch):
         assert client.post("/retrain", auth=AUTH).status_code == 409
     finally:
         state.release_retrain_lock()
+
+
+# ---------------------------------------------------------------- confiance et retours
+def test_prediction_has_id_and_confidence(client):
+    body = client.post("/predict", data={"text": "chaise"}, auth=USER).json()
+    assert len(body["prediction_id"]) == 32
+    assert body["confidence"] == 0.9 and body["low_confidence"] is False
+    body = client.post("/predict", data={"text": "ambigu"}, auth=USER).json()
+    assert body["low_confidence"] is True
+
+
+def predict_id(client):
+    return client.post("/predict", data={"text": "chaise"}, auth=USER).json()["prediction_id"]
+
+
+def test_feedback_is_recorded(client):
+    from src import state
+
+    pid = predict_id(client)
+    r = client.post("/feedback", json={"prediction_id": pid, "prdtypecode": 1560}, auth=USER)
+    assert r.status_code == 200 and r.json()["correct"] is True
+    r = client.post("/feedback", json={"prediction_id": predict_id(client), "prdtypecode": 2060}, auth=USER)
+    assert r.json()["correct"] is False and r.json()["predicted"] == 1560 and r.json()["true"] == 2060
+    assert state.recent_feedback()[-1]["true"] == 2060
+
+
+def test_feedback_twice_is_409(client):
+    pid = predict_id(client)
+    assert client.post("/feedback", json={"prediction_id": pid, "prdtypecode": 1560}, auth=USER).status_code == 200
+    assert client.post("/feedback", json={"prediction_id": pid, "prdtypecode": 10}, auth=USER).status_code == 409
+
+
+def test_feedback_unknown_prediction_is_404(client):
+    r = client.post("/feedback", json={"prediction_id": "0" * 32, "prdtypecode": 1560}, auth=USER)
+    assert r.status_code == 404
+
+
+def test_feedback_unknown_category_is_400(client):
+    r = client.post("/feedback", json={"prediction_id": predict_id(client), "prdtypecode": 9999}, auth=USER)
+    assert r.status_code == 400
+
+
+def test_feedback_requires_auth(client):
+    assert client.post("/feedback", json={"prediction_id": "x", "prdtypecode": 10}).status_code == 401

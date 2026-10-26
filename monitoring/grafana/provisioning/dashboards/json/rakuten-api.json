@@ -482,6 +482,193 @@
           }
         }
       ]
+    },
+    {
+      "title": "F1-macro : production vs entraînement",
+      "type": "timeseries",
+      "id": 13,
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 34
+      },
+      "targets": [
+        {
+          "expr": "model_production_f1_macro",
+          "legendFormat": "production (retours modérateurs)",
+          "refId": "A"
+        },
+        {
+          "expr": "max(model_f1_macro{pipeline=\"text\"})",
+          "legendFormat": "entraînement (validation)",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "max": 1,
+          "decimals": 3,
+          "custom": {
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "transparent",
+                "value": 0.75
+              }
+            ]
+          }
+        }
+      },
+      "description": "Le F1 en production est calculé sur les 500 derniers retours (POST /feedback). Ligne rouge : seuil 0,75 (alerte ProductionF1Low)."
+    },
+    {
+      "title": "Accuracy selon la confiance du modèle",
+      "type": "bargauge",
+      "id": 14,
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 12,
+        "y": 34
+      },
+      "targets": [
+        {
+          "expr": "model_production_accuracy_by_confidence",
+          "legendFormat": "{{confidence}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.5
+              },
+              {
+                "color": "green",
+                "value": 0.8
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "description": "high = prédictions sûres, low = peu sûres (marge sous le seuil calibré). Un écart net montre que la confiance est un bon signal."
+    },
+    {
+      "title": "Retours des modérateurs",
+      "type": "stat",
+      "id": 15,
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 18,
+        "y": 34
+      },
+      "targets": [
+        {
+          "expr": "model_production_feedback_samples",
+          "legendFormat": "retours analysés",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(increase(feedback_total[1h]))",
+          "legendFormat": "retours (1 h)",
+          "refId": "B"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "value",
+        "graphMode": "none"
+      }
+    },
+    {
+      "title": "Prédictions peu sûres",
+      "type": "timeseries",
+      "id": 16,
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 42
+      },
+      "targets": [
+        {
+          "expr": "sum by (modality) (increase(predict_low_confidence_total[5m])) / sum by (modality) (increase(predict_requests_total{status=\"ok\"}[5m]))",
+          "legendFormat": "{{modality}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1
+        }
+      },
+      "description": "Part des prédictions dont la marge est sous le seuil calibré (scripts/calibrate_confidence.py)."
+    },
+    {
+      "title": "Confiance des prédictions (p50 / p10)",
+      "type": "timeseries",
+      "id": 17,
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 42
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.5, sum by (le, modality) (rate(predict_confidence_bucket[5m])))",
+          "legendFormat": "médiane {{modality}}",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.1, sum by (le, modality) (rate(predict_confidence_bucket[5m])))",
+          "legendFormat": "10 % les moins sûres {{modality}}",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 2
+        }
+      }
     }
   ],
   "schemaVersion": 39,
@@ -499,5 +686,5 @@
   "timezone": "browser",
   "title": "Rakuten Inference API",
   "uid": "rakuten-api",
-  "version": 3
+  "version": 4
 }

@@ -6,13 +6,14 @@ Authentification (HTTP Basic)
   (défaut : admin:rakuten:admin,demo:demo:user), comparés en temps constant.
 
 Autorisation (rôles)
-  user  : POST /predict
-  admin : POST /predict, GET /model/info, POST /retrain
+  user  : POST /predict, POST /feedback
+  admin : POST /predict, POST /feedback, GET /model/info, POST /retrain
   Mauvais rôle -> 403.
 
 Limite de requêtes (fenêtre glissante, par utilisateur)
   /predict : PREDICT_RATE_LIMIT (user, défaut 30/minute), PREDICT_RATE_LIMIT_ADMIN (défaut 600/minute)
   /retrain : RETRAIN_RATE_LIMIT (défaut 2/hour)
+  /feedback : FEEDBACK_RATE_LIMIT (défaut 300/minute)
   Au-delà : 429 + Retry-After. Compteurs dans Redis (REDIS_URL) pour être
   partagés entre les répliques de l'API, en mémoire sinon (tests, mode local).
 
@@ -166,6 +167,10 @@ predict_limiter = RateLimiter("/predict", {
     "user": os.getenv("PREDICT_RATE_LIMIT", "30/minute"),
     "admin": os.getenv("PREDICT_RATE_LIMIT_ADMIN", "600/minute"),
 })
+feedback_limiter = RateLimiter("/feedback", {
+    "user": os.getenv("FEEDBACK_RATE_LIMIT", "300/minute"),
+    "admin": os.getenv("FEEDBACK_RATE_LIMIT_ADMIN", "1200/minute"),
+})
 retrain_limiter = RateLimiter("/retrain", {
     "user": os.getenv("RETRAIN_RATE_LIMIT", "2/hour"),
     "admin": os.getenv("RETRAIN_RATE_LIMIT", "2/hour"),
@@ -173,6 +178,6 @@ retrain_limiter = RateLimiter("/retrain", {
 
 # compteurs exposés à 0 dès le démarrage : sinon Prometheus découvre la série
 # au premier refus et increase() ignore les premières valeurs (alertes)
-for _endpoint in ("/predict", "/retrain", "/model/info"):
+for _endpoint in ("/predict", "/feedback", "/retrain", "/model/info"):
     RATE_LIMITED.labels(endpoint=_endpoint)
     FORBIDDEN.labels(endpoint=_endpoint)

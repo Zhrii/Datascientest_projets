@@ -12,30 +12,30 @@ La stack reprend le schéma *Architecture Overview* (ZenML) bloc par bloc, et ch
 | Étapes du pipeline | (dans `train`) | — | collect → **validate** → preprocess → train → promote |
 | Model Registry | `mlflow` | **5000** | Chaque entraînement = une version de `rakuten-text-svm` ; l'alias `production` désigne celle servie |
 | Répartiteur de charge | `api-gateway` (nginx) | **8000** | Répartit les requêtes sur les répliques de l'API |
-| FastAPI Inference | `api` (×2) | — | Charge `rakuten-text-svm@production` + image + fusion ; `/predict` `/retrain` `/model/info` `/health` `/metrics` |
+| FastAPI Inference | `api` (×2) | — | Charge `rakuten-text-svm@production` + image + fusion ; `/predict` (+ confiance) `/feedback` `/retrain` `/model/info` `/health` `/metrics` |
 | État partagé | `redis` | — | Limite de requêtes, verrou et statut du `/retrain`, journal des prédictions |
 | ZenML Server | `zenml` | **8888** | Historique des runs du pipeline, étapes, artefacts |
 | MySQL | `mysql` | — | Base de métadonnées du serveur ZenML |
 | MinIO S3 | `minio` | 9000 / **9001** | Buckets `zenml` (artefacts entre étapes), `mlflow` (fichiers des modèles), `dvc` (données versionnées) |
 | MLflow Experiments | `mlflow` | **5000** | Paramètres, F1, version des données, rapport qualité, fichiers de chaque entraînement |
-| Dérive des données | `drift-monitor` | — | Compare les produits reçus aux données d'entraînement (Evidently) |
+| Dérive des données et F1 en production | `drift-monitor` | — | Compare les produits reçus aux données d'entraînement (Evidently) ; F1 en production sur les retours des modérateurs |
 | Automatisation | `scheduler` | — | Déclenche `/retrain` tout seul (modèle > 30 jours, +10 % de données) |
-| Prometheus | `prometheus` | **9092** | Scrape les répliques de l'API et le drift-monitor + 12 règles d'alerte |
+| Prometheus | `prometheus` | **9092** | Scrape les répliques de l'API et le drift-monitor + 14 règles d'alerte |
 | Grafana | `grafana` | **3002** | Dashboard *Rakuten Inference API* |
 | UI | `streamlit` | 8501 | Démo, appelle l'API |
 
 ```
 You
  ├─ make train / POST /retrain / scheduler → Pipeline Runner (ZenML)
- │     1. collect_data ──── version des données (empreintes DVC)
+ │     1. collect_data ──── version des données (empreintes DVC) ; 3 % mis de côté (holdout)
  │     2. validate_data ─── arrêt du pipeline si les données sont cassées
  │     3. preprocess_data ─────────────► MinIO (artefact processed_data)
  │     4. train_model ──── Log Metrics ► MLflow (+ version des données, rapport qualité, fichiers dans MinIO)
  │                    └─ Register ────► Model Registry (nouvelle version)
- │     5. promote_model ── si F1 ≥ prod ► alias "production" + models/ (archive de l'ancien)
+ │     5. promote_model ── si F1 ≥ prod sur le holdout ► alias "production" + models/ (archive)
  │     Track Run ─────────────────────► ZenML Server ─► MySQL
  ├─ API calls ─► nginx :8000 ─► FastAPI ×2 ── Load Production Model ◄ Model Registry (rechargé seul)
- │                                  └─ journal des prédictions ─► Redis ─► drift-monitor (Evidently)
+ │                                  └─ prédictions + retours /feedback ─► Redis ─► drift-monitor (dérive, F1 prod)
  ├─ dvc push / pull ─► MinIO (bucket dvc)
  ├─ View pipelines → ZenML :8888
  └─ View experiments → MLflow :5000
@@ -59,21 +59,21 @@ Stratégie de réentraînement (déclencheurs, promotion, rollback, limites) : [
 | | Isolation des services | 14 services Docker (dont l'API en 2 répliques), 1 container = 1 tâche |
 | **3 — Orchestration et déploiement** | Orchestration de bout en bout | pipeline ZenML en 5 étapes |
 | | API sécurisée | authentification (HTTP Basic) + **autorisation par rôle** (user / admin) + limite de requêtes |
-| | CI | GitHub Actions : 57 tests pytest à chaque push |
+| | CI | GitHub Actions : 73 tests pytest à chaque push |
 | | Réentraînement et déploiement automatisés | `scheduler` → `/retrain` → promotion → les répliques chargent le nouveau modèle seules |
 | | Scalabilité légère | **2 répliques** de l'API derrière **nginx**, état partagé dans **Redis** |
-| **4 — Surveillance et maintenance** | Monitoring des performances | Prometheus + Grafana (trafic, latence, erreurs, F1, âge du modèle) |
+| **4 — Surveillance et maintenance** | Monitoring des performances | Prometheus + Grafana (trafic, latence, erreurs, âge du modèle) ; **F1 en production** sur les retours des modérateurs (`POST /feedback`) ; **confiance** de chaque prédiction |
 | | Qualité des données | étape `validate_data` du pipeline (rapport dans MLflow) |
 | | Détection de dérive | **Evidently** (`drift-monitor`) → métriques, alerte `DataDrift`, rapport HTML |
-| | Système d'alertes | 12 règles Prometheus |
+| | Système d'alertes | 14 règles Prometheus |
 | | Front-end | Streamlit, page *8. MLOps / API* pour la démo |
 
 ## Sécurité de l'API (`api/security.py`)
 
 | Compte | Rôle | Droits | Limite `/predict` |
 |--------|------|--------|-------------------|
-| `demo` / `demo` | user | `/predict` | 30 / minute |
-| `admin` / `rakuten` | admin | `/predict`, `/model/info`, `/retrain` | 600 / minute |
+| `demo` / `demo` | user | `/predict`, `/feedback` | 30 / minute |
+| `admin` / `rakuten` | admin | `/predict`, `/feedback`, `/model/info`, `/retrain` | 600 / minute |
 
 - **Authentification** HTTP Basic, comparaison en temps constant ; mauvais identifiants → **401**.
 - **Autorisation** : un *user* sur une route *admin* → **403**.
@@ -112,6 +112,20 @@ $env:API_REPLICAS=3; docker compose up -d   # passer à 3 répliques
 
 **Dérive (`drift-monitor`, Evidently).** Toutes les 2 minutes, les 300 derniers produits reçus par l'API (au moins 200) sont comparés à 5 000 produits d'entraînement sur : longueur du texte, nombre de mots, part de chiffres, catégorie (vraie en référence, prédite en production). Distances de Wasserstein (numériques, seuil 0,2) et de Jensen-Shannon (catégorie, seuil 0,25), calibrées sur de vrais produits Rakuten (≤ 0,11) et sur des produits inhabituels (0,7 à 6) ; le jeu est déclaré en dérive si au moins la moitié des variables ont dérivé. Les textes reçus sont nettoyés exactement comme le fait l'API avant de prédire (`src/preprocessing/serving.py`). Résultats : métriques `data_drift_*` (Grafana, alerte `DataDrift`) et rapport HTML `reports/drift_report.html` (affiché dans Streamlit). Démo : bouton *Simuler une dérive* de Streamlit.
 
+## Modèle en production : confiance et retours des modérateurs
+
+**Confiance.** Chaque réponse de `POST /predict` contient `confidence` (marge entre le meilleur et le deuxième score du modèle) et `low_confidence`. Seuils calibrés sur le holdout (`scripts/calibrate_confidence.py`) : sous le seuil, le modèle se trompe plus d'une fois sur deux.
+
+| Modèle | Seuil | Prédictions peu sûres | Accuracy des peu sûres | Accuracy des sûres |
+|--------|------:|:--------------------:|:---------------------:|:-----------------:|
+| texte | 0,387 | 21 % | 42 % | 89 % |
+| fusion | 0,281 | 16 % | 37 % | 86 % |
+| image | 2,463 | 62 % | 42 % | 82 % |
+
+**Retours des modérateurs.** `POST /feedback {prediction_id, prdtypecode}` (rôle user) enregistre la vraie catégorie d'une prédiction (404 si inconnue ou expirée après 7 jours, 400 si catégorie inconnue, 409 si déjà reçue). Le drift-monitor calcule le **F1-macro en production** sur les 500 derniers retours (à partir de 100) et l'accuracy selon la confiance → Grafana, alerte `ProductionF1Low`. Test réel : 0,823 sur 300 retours normaux ; 0,478 après 300 fiches bâclées, avec `ProductionF1Low`, `LowConfidenceSpike` et `DataDrift` déclenchées.
+
+**Holdout.** 3 % de X_train (2 476 produits, choisis par empreinte du `productid`, toujours les mêmes) ne servent jamais à entraîner (`scripts/holdout.py`, étape `collect_data`). Ils servent à calibrer la confiance, à **comparer équitablement candidat et production** lors de la promotion (`promote_model.py --holdout`), et à simuler des retours dans Streamlit.
+
 ## Automatisation des entraînements
 
 Le container `scheduler` vérifie toutes les heures (`CHECK_INTERVAL_SECONDS`) les déclencheurs de la stratégie de réentraînement :
@@ -136,7 +150,9 @@ S'il faut réentraîner, il appelle `POST /retrain` (compte admin) : l'API lance
 | RateLimitHit | > 10 requêtes bloquées (429) en 5 min | warning |
 | ForbiddenAccess | > 5 accès refusés (403) en 5 min | warning |
 | AuthFailures | > 5 mots de passe refusés en 5 min | warning |
-| ModelF1Low | F1-macro texte < 0,75 | warning |
+| ModelF1Low | F1-macro d'entraînement < 0,75 | warning |
+| ProductionF1Low | F1-macro en production (retours des modérateurs, ≥ 100) < 0,75 | critical |
+| LowConfidenceSpike | > 40 % de prédictions texte peu sûres sur 15 min (référence calibrée : 21 %) | warning |
 | ModelTooOld | modèle texte entraîné il y a > 30 jours | info |
 | DataDrift | dérive détectée par Evidently | warning |
 | DriftMonitorDown | aucune analyse de dérive depuis 15 min | warning |
@@ -149,7 +165,7 @@ Visibles sur http://localhost:9092/alerts et dans le panneau *Alertes actives* d
 .\make.ps1 test     # pytest dans l'image de l'API
 ```
 
-57 tests (`tests/`) : routes publiques / protégées, rôles (403), mauvais mot de passe, prédiction, validation (400), limite de requêtes (429, par rôle, partagée via Redis), verrou du `/retrain` (409), journal des prédictions, promotion (premier modèle, meilleur, moins bon, `--min-gain`, `--dry-run`, candidat incomplet), contrôle qualité des données, version des données, détection de dérive (Evidently), déclencheurs du scheduler, nettoyage HTML. Les mêmes tests tournent sur GitHub à chaque push (`.github/workflows/tests.yml`).
+73 tests (`tests/`) : routes publiques / protégées, rôles (403), mauvais mot de passe, prédiction, validation (400), limite de requêtes (429, par rôle, partagée via Redis), verrou du `/retrain` (409), journal des prédictions, promotion (premier modèle, meilleur, moins bon, `--min-gain`, `--dry-run`, candidat incomplet), contrôle qualité des données, version des données, détection de dérive (Evidently), déclencheurs du scheduler, nettoyage HTML, retours `/feedback` (200 / 400 / 404 / 409), F1 en production, confiance du modèle, holdout, calibrage, comparaison équitable des modèles sur le holdout. Les mêmes tests tournent sur GitHub à chaque push (`.github/workflows/tests.yml`).
 
 ## Prérequis
 

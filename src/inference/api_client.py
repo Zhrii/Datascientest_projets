@@ -116,3 +116,42 @@ def send_drift_traffic(n: int = 250) -> Dict[str, int]:
         r = requests.post(f"{API_URL}/predict", data={"text": text}, auth=ADMIN_AUTH, timeout=TIMEOUT)
         codes[str(r.status_code)] += 1
     return dict(codes)
+
+
+# ---- Retours des modérateurs (F1 en production) ----
+
+def send_feedback(prediction_id: str, prdtypecode: int) -> Dict[str, Any]:
+    """Envoie la vraie catégorie d'un produit déjà prédit (compte user)."""
+    r = requests.post(f"{API_URL}/feedback", json={"prediction_id": prediction_id, "prdtypecode": int(prdtypecode)},
+                      auth=AUTH, timeout=10)
+    r.raise_for_status()
+    return r.json()
+
+
+def simulate_feedback(n: int = 300, degraded: bool = False) -> Dict[str, Any]:
+    """Simule des modérateurs : prédit n produits mis de côté (vraie catégorie connue,
+    jamais vus à l'entraînement) puis renvoie leur vraie catégorie via /feedback.
+
+    degraded=True : on n'envoie que le premier mot du titre (fiches produit bâclées)
+    -> le modèle se trompe davantage, le F1 en production doit chuter.
+    """
+    import pandas as pd
+
+    holdout = pd.read_csv(os.getenv("HOLDOUT_CSV", "data/holdout/holdout.csv"))
+    sample = holdout.sample(min(n, len(holdout)), random_state=random.randint(0, 10_000))
+    correct = Counter()
+    for row in sample.itertuples():
+        if degraded:
+            text = str(row.designation).split()[0]
+        else:
+            text = f"{row.designation} {row.description if isinstance(row.description, str) else ''}".strip()
+        r = requests.post(f"{API_URL}/predict", data={"text": text}, auth=ADMIN_AUTH, timeout=TIMEOUT)
+        if r.status_code != 200:
+            correct["erreur predict"] += 1
+            continue
+        pred = r.json()
+        fb = requests.post(f"{API_URL}/feedback", json={"prediction_id": pred["prediction_id"],
+                                                        "prdtypecode": int(row.prdtypecode)},
+                           auth=ADMIN_AUTH, timeout=10)
+        correct["correctes" if pred["prdtypecode"] == row.prdtypecode else "fausses"] += 1 if fb.ok else 0
+    return dict(correct)

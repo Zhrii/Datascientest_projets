@@ -14,7 +14,7 @@ Il faut donc décider **quand** on réentraîne, **comment** on le fait sans ris
 | Déclencheur | Seuil proposé | Statut |
 |---|---|---|
 | Nouvelles données étiquetées | au moins 10 % de produits en plus depuis le dernier entraînement | à valider en équipe |
-| Le modèle devient moins bon | F1-macro < 0,75 sur des produits récents étiquetés | il faudra récupérer des retours (Phase 4) |
+| Le modèle devient moins bon | F1-macro < 0,75 sur les retours des modérateurs (`POST /feedback`) | alerte `ProductionF1Low` (voir § 6) |
 | Rythme régulier | une fois par mois | à valider en équipe |
 | Code d'entraînement modifié | à chaque changement | manuel |
 
@@ -36,9 +36,9 @@ models/                  <- modèle EN PRODUCTION (lu par l'API)
 
 Les trois étapes sont celles du pipeline ZenML `rakuten_training_pipeline`, lancé par `.\make.ps1 train` (ou `POST /retrain` sur l'API) :
 
-0. **Contrôle des données** (étapes `collect_data` puis `validate_data`) : colonnes, 27 catégories, doublons, désignations vides. Si un contrôle échoue, le pipeline s'arrête : on n'entraîne pas sur des données cassées. La version des données (empreintes DVC) est relevée.
+0. **Contrôle des données** (étapes `collect_data` puis `validate_data`) : 3 % des produits sont mis de côté une fois pour toutes (*holdout*, jamais utilisés pour entraîner) ; puis contrôle des colonnes, des 27 catégories, des doublons et des désignations vides. Si un contrôle échoue, le pipeline s'arrête : on n'entraîne pas sur des données cassées. La version des données (empreintes DVC) est relevée.
 1. **Entraînement** (étapes `preprocess_data` puis `train_model`) : le nouveau modèle est écrit dans `models/candidate/`, le run est noté dans MLflow avec la version des données et le rapport qualité, et le modèle devient une nouvelle version de `rakuten-text-svm` dans le Model Registry.
-2. **Promotion** (étape `promote_model`) : on compare le F1-macro du candidat avec celui de la production.
+2. **Promotion** (étape `promote_model`) : on note le candidat **et** le modèle en production sur les **mêmes produits mis de côté** (2 476 produits jamais vus), et on compare leurs F1-macro.
    - Candidat au moins aussi bon : l'ancien modèle est archivé, le candidat prend sa place, sa version reçoit l'alias `production` dans le Model Registry, et le run MLflow reçoit le tag `promoted_to_production=true`.
    - Candidat moins bon : refusé, la production ne bouge pas, le tag est `false`.
 3. **Mise en service** : chaque réplique de l'API vérifie toutes les minutes l'alias `production` du Model Registry et charge la nouvelle version toute seule, sans redémarrage ni coupure.
@@ -65,7 +65,17 @@ MLflow garde aussi les 3 fichiers de chaque entraînement (onglet Artifacts, sto
 
 ## 5. Limites (à dire honnêtement dans le rapport)
 
-- **Les deux modèles ne sont pas testés sur exactement les mêmes produits.** Chaque entraînement tire ses 20 % de test au hasard (avec une graine fixe) dans les données du moment. Si les données changent, la comparaison n'est pas parfaite. Amélioration possible : un jeu de test fixe, jamais utilisé pour entraîner.
-- **Le F1 en production n'est pas mesuré directement.** Il ne se calcule que sur des produits dont on connaît la vraie catégorie. À la place, on surveille un signe avant-coureur : la **dérive des données** (Evidently, container `drift-monitor`) compare les produits reçus aux données d'entraînement — forme des textes et répartition des catégories prédites — et déclenche l'alerte `DataDrift`. Une dérive n'est pas réentraînée automatiquement : sans nouvelles données étiquetées, réentraîner ne changerait rien ; elle signale qu'il faut en collecter.
-- **Le déclencheur « F1 < 0,75 sur des produits récents » n'est pas automatisé.** Il faudrait des produits récents dont on connaît la vraie catégorie (retours des modérateurs). Le scheduler ne gère que l'âge du modèle et la quantité de données ; l'alerte `ModelF1Low` porte sur le F1 mesuré à l'entraînement.
+- **Comparaison équitable, mais sur un jeu fixe.** Candidat et production sont notés sur les mêmes 2 476 produits mis de côté (`--holdout`). Ce jeu ne change pas : s'il vieillit (nouveaux types de produits), il faut le renouveler, et refaire une fois la transition décrite au § 6.
+- **Le F1 en production dépend des retours des modérateurs.** Sans retours, on n'a que des signes avant-coureurs : la **dérive des données** (Evidently, alerte `DataDrift`) et la **confiance du modèle** (alerte `LowConfidenceSpike`). Une dérive n'est pas réentraînée automatiquement : sans nouvelles données étiquetées, réentraîner ne changerait rien.
+- **Une baisse du F1 en production déclenche une alerte, pas un réentraînement.** Il faudrait d'abord ajouter les retours des modérateurs (texte + vraie catégorie) aux données d'entraînement ; c'est l'étape suivante logique.
 - **Un seul critère de décision (le F1-macro).** On pourrait aussi regarder le score par classe, pour ne pas promouvoir un modèle qui s'effondre sur une petite classe.
+
+## 6. Mesurer le modèle en production (retours des modérateurs et confiance)
+
+**Pourquoi.** Le F1-macro d'entraînement dit si le modèle était bon le jour où il a été entraîné. En production, on ne connaît pas la vraie catégorie des produits reçus : on ne peut pas calculer de F1 sans aide.
+
+**Retours des modérateurs.** Chaque réponse de `POST /predict` contient un `prediction_id`. Un modérateur qui vérifie le produit renvoie la vraie catégorie avec `POST /feedback`. Le drift-monitor calcule le **F1-macro en production** sur les 500 derniers retours (à partir de 100) ; sous 0,75, l'alerte `ProductionF1Low` se déclenche. Grafana affiche le F1 en production à côté du F1 d'entraînement.
+
+**Confiance du modèle.** Chaque prédiction a une confiance : la marge entre le meilleur score du modèle et le deuxième. Le seuil de « prédiction peu sûre » est calibré sur les produits mis de côté (`scripts/calibrate_confidence.py`) : sous ce seuil, le modèle se trompe au moins une fois sur deux. Ces prédictions sont à faire vérifier en priorité par un modérateur ; si leur part explose, l'alerte `LowConfidenceSpike` se déclenche. Les retours vérifient que ce signal tient : Grafana compare l'accuracy des prédictions sûres et peu sûres.
+
+**Transition vers le jeu mis de côté (une seule fois).** Le modèle en production avant l'ajout du holdout (version 4) avait été entraîné sur ces produits : sur le holdout, il obtenait 0,873, un score gonflé. Le premier modèle entraîné sans eux (version 5, 0,769 sur le holdout, cohérent avec ses 0,773 en validation) a donc été promu avec `--force`. Depuis, tous les modèles sont entraînés sans le holdout et comparés équitablement dessus.

@@ -23,6 +23,8 @@ from src.inference.api_client import (
     probe_without_auth,
     retrain_as_user,
     send_drift_traffic,
+    send_feedback,
+    simulate_feedback,
     trigger_retrain,
 )
 
@@ -106,10 +108,40 @@ def show_prediction(result: dict, source: str):
         f"F1-macro : {result.get('f1_macro', '—')} · "
         f"via {source.upper()}"
     )
+    if result.get("confidence") is not None:
+        if result.get("low_confidence"):
+            st.warning(f"⚠️ Prédiction peu sûre (confiance {result['confidence']:.2f}) : à faire vérifier par un modérateur.")
+        else:
+            st.caption(f"Confiance du modèle : {result['confidence']:.2f}")
     if result.get("fallback"):
         st.info(f"Fallback : {result['fallback']}")
     if result.get("latency_ms") is not None:
         st.caption(f"Latence API : {result['latency_ms']} ms")
+    if source == "api" and result.get("prediction_id"):
+        # gardé en session : le formulaire de correction survit au rechargement de la page
+        st.session_state["last_prediction"] = {**result, "page": st.session_state.get("page")}
+
+
+def feedback_form():
+    """Correction de la dernière prédiction par un modérateur (POST /feedback)."""
+    last = st.session_state.get("last_prediction")
+    if not last or last.get("page") != st.session_state.get("page"):
+        return
+    st.divider()
+    st.markdown("**Retour modérateur** — la catégorie prédite est-elle la bonne ?")
+    codes = list(DICT_CATEGORIES)
+    choice = st.selectbox(
+        "Vraie catégorie", codes, index=codes.index(last["prdtypecode"]) if last["prdtypecode"] in codes else 0,
+        format_func=lambda c: f"{DICT_CATEGORIES[c]} ({c})", key=f"fb_{last['prediction_id']}",
+    )
+    if st.button("Envoyer le retour"):
+        try:
+            resp = send_feedback(last["prediction_id"], choice)
+            verdict = "✅ le modèle avait raison" if resp["correct"] else "❌ le modèle s'était trompé"
+            st.success(f"Retour enregistré : {verdict}. Il compte dans le F1 en production (Grafana).")
+            st.session_state.pop("last_prediction", None)
+        except requests.HTTPError as exc:
+            st.error(f"Retour refusé ({exc.response.status_code}) : {exc.response.json().get('detail')}")
 
 
 # ---------------------------------------------------------------------------
@@ -136,6 +168,8 @@ page = st.sidebar.radio(
         "8. MLOps / API",
     ],
 )
+
+st.session_state["page"] = page
 
 st.sidebar.markdown("---")
 api_ok = api_available()
@@ -357,7 +391,7 @@ elif page == "8. MLOps / API":
     | Composant | Port | Rôle |
     |-----------|------|------|
     | nginx (`api-gateway`) | 8000 | Répartit la charge sur les répliques de l'API |
-    | FastAPI (×2) | — | `/predict` 🔒, `/model/info` 🔒👑, `/retrain` 🔒👑, `/health`, `/metrics` |
+    | FastAPI (×2) | — | `/predict` 🔒, `/feedback` 🔒, `/model/info` 🔒👑, `/retrain` 🔒👑, `/health`, `/metrics` |
     | Redis | — | État partagé des répliques (limites, verrou, journal des prédictions) |
     | Streamlit | 8501 | UI (cette app) |
     | Pipeline Runner (`train`) | — | ZenML : collect → validate → preprocess → train → promote |
@@ -365,7 +399,7 @@ elif page == "8. MLOps / API":
     | MinIO | 9001 | S3 : artefacts ZenML, MLflow et données versionnées par DVC |
     | MLflow | 5000 | Expériences + Model Registry (alias `production`) |
     | Scheduler | — | Déclenche `/retrain` tout seul (modèle trop vieux / +10 % de données) |
-    | Drift monitor | — | Dérive des données en production (Evidently) |
+    | Drift monitor | — | Dérive des données (Evidently) + F1 en production (retours modérateurs) |
     | Prometheus | 9092 | Métriques + règles d'alerte |
     | Grafana | 3002 | Dashboards + alertes actives |
 
@@ -452,8 +486,47 @@ elif page == "8. MLOps / API":
 
             components.html(report.read_text(encoding="utf-8"), height=900, scrolling=True)
 
+    # ---------------------------------------------------------------- performance
+    st.subheader("4. Performance du modèle en production")
+    st.markdown(
+        "Le F1 ne se mesure que si l'on connaît la **vraie catégorie** : les modérateurs la renvoient via "
+        "`POST /feedback` (formulaire sous chaque prédiction). Le drift-monitor calcule le **F1 en production** "
+        "sur les 500 derniers retours, et l'**accuracy selon la confiance** du modèle."
+    )
+    perf_file = reports_dir / "performance_status.json"
+    if perf_file.exists():
+        import json
+
+        perf = json.loads(perf_file.read_text(encoding="utf-8"))
+        if perf["status"] == "waiting":
+            st.info(f"F1 en production : {perf['message']}.")
+        else:
+            c1, c2, c3 = st.columns(3)
+            c1.metric("F1-macro en production", f"{perf['f1_macro']:.3f}", help=f"{perf['n_feedback']} retours")
+            by_conf = perf.get("by_confidence", {})
+            if "high" in by_conf:
+                c2.metric("Accuracy — prédictions sûres", f"{by_conf['high']['accuracy']:.0%}")
+            if "low" in by_conf:
+                c3.metric("Accuracy — prédictions peu sûres", f"{by_conf['low']['accuracy']:.0%}",
+                          help=f"{perf['low_confidence_share']:.0%} des prédictions")
+    col_f1, col_f2 = st.columns(2)
+    with col_f1:
+        if st.button("Simuler 300 retours de modérateurs"):
+            with st.spinner("Prédiction de produits mis de côté puis envoi de leur vraie catégorie..."):
+                try:
+                    st.info(f"Prédictions : {simulate_feedback(300)} — F1 mis à jour à la prochaine analyse (≤ 2 min)")
+                except Exception as e:  # noqa: BLE001
+                    st.error(str(e))
+    with col_f2:
+        if st.button("Simuler 300 fiches produit bâclées"):
+            with st.spinner("Titres réduits à un seul mot : le modèle va se tromper davantage..."):
+                try:
+                    st.info(f"Prédictions : {simulate_feedback(300, degraded=True)} — le F1 en production doit chuter")
+                except Exception as e:  # noqa: BLE001
+                    st.error(str(e))
+
     # ---------------------------------------------------------------- réentraînement
-    st.subheader("4. Réentraînement")
+    st.subheader("5. Réentraînement")
     if st.button("Déclencher /retrain (compte admin)"):
         if not api_available():
             st.error("API offline. Lancez `.\\make.ps1 up` d'abord.")
@@ -465,3 +538,8 @@ elif page == "8. MLOps / API":
 
     st.markdown("**Catégories référencées :**")
     st.json(DICT_CATEGORIES)
+
+
+# formulaire de retour modérateur sous les assistants de prédiction
+if page in ("4. Assistant Texte", "5. Assistant Image", "6. Moteur Multimodal"):
+    feedback_form()

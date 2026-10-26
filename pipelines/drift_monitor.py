@@ -1,13 +1,18 @@
 """
-Drift monitor (container "drift-monitor") : détecte une dérive des données en production.
+Drift monitor (container "drift-monitor") : surveille les données ET le modèle en production.
 
 Toutes les DRIFT_CHECK_SECONDS :
-  1. lit les DRIFT_WINDOW dernières prédictions de l'API (Redis, src/state.py)
-  2. s'il y en a au moins DRIFT_MIN_SAMPLES, les compare aux données d'entraînement
-     avec Evidently (src/monitoring/drift.py)
-  3. écrit le rapport HTML (reports/drift_report.html, affiché dans Streamlit)
-     et un résumé JSON (reports/drift_status.json)
-  4. expose le résultat à Prometheus sur :8001/metrics -> alerte DataDrift + Grafana
+  Dérive des données
+    1. lit les DRIFT_WINDOW dernières prédictions de l'API (Redis, src/state.py)
+    2. s'il y en a au moins DRIFT_MIN_SAMPLES, les compare aux données d'entraînement
+       avec Evidently (src/monitoring/drift.py)
+    3. écrit le rapport HTML (reports/drift_report.html) et reports/drift_status.json
+  Performance du modèle
+    4. lit les FEEDBACK_WINDOW derniers retours des modérateurs (POST /feedback)
+    5. s'il y en a au moins FEEDBACK_MIN_SAMPLES, calcule le F1 en production
+       (src/monitoring/performance.py) -> reports/performance_status.json
+  Les résultats sont exposés à Prometheus sur :8001/metrics
+  -> alertes DataDrift, ProductionF1Low + Grafana
 
 Lancement :
     python pipelines/drift_monitor.py           # boucle infinie
@@ -32,7 +37,8 @@ if str(ROOT) not in sys.path:
 from prometheus_client import Gauge, start_http_server  # noqa: E402
 
 from src.monitoring.drift import build_current, build_reference, compute_drift  # noqa: E402
-from src.state import recent_predictions  # noqa: E402
+from src.monitoring.performance import compute_performance  # noqa: E402
+from src.state import recent_feedback, recent_predictions  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("drift-monitor")
@@ -43,6 +49,8 @@ CHECK_SECONDS = int(os.getenv("DRIFT_CHECK_SECONDS", "120"))
 WINDOW = int(os.getenv("DRIFT_WINDOW", "300"))
 MIN_SAMPLES = int(os.getenv("DRIFT_MIN_SAMPLES", "200"))  # en dessous : trop de bruit (27 catégories)
 METRICS_PORT = int(os.getenv("DRIFT_METRICS_PORT", "8001"))
+FEEDBACK_WINDOW = int(os.getenv("FEEDBACK_WINDOW", "500"))
+FEEDBACK_MIN_SAMPLES = int(os.getenv("FEEDBACK_MIN_SAMPLES", "100"))
 
 DRIFT_SHARE = Gauge("data_drift_share", "Part des variables en dérive (0-1)")
 DRIFT_DETECTED = Gauge("data_drift_detected", "Dérive détectée sur le jeu (1/0)")
@@ -50,6 +58,27 @@ COLUMN_SCORE = Gauge("data_drift_column_score", "Score de dérive par variable (
 COLUMN_DRIFTED = Gauge("data_drift_column_drifted", "Variable en dérive (1/0)", ["column"])
 CURRENT_SAMPLES = Gauge("data_drift_current_samples", "Prédictions analysées")
 LAST_CHECK = Gauge("data_drift_last_check_timestamp_seconds", "Date de la dernière analyse (epoch)")
+
+PROD_F1 = Gauge("model_production_f1_macro", "F1-macro en production (retours des modérateurs)")
+PROD_ACCURACY = Gauge("model_production_accuracy", "Accuracy en production (retours des modérateurs)")
+PROD_ACCURACY_BY_CONF = Gauge("model_production_accuracy_by_confidence",
+                              "Accuracy en production selon la confiance du modèle", ["confidence"])
+FEEDBACK_SAMPLES = Gauge("model_production_feedback_samples", "Retours de modérateurs analysés")
+
+
+def check_performance() -> dict:
+    status = compute_performance(recent_feedback(FEEDBACK_WINDOW), FEEDBACK_MIN_SAMPLES)
+    FEEDBACK_SAMPLES.set(status["n_feedback"])
+    if status["status"] == "ok":
+        PROD_F1.set(status["f1_macro"])
+        PROD_ACCURACY.set(status["accuracy"])
+        for label, info in status["by_confidence"].items():
+            PROD_ACCURACY_BY_CONF.labels(confidence=label).set(info["accuracy"])
+    status["checked_at"] = time.time()
+    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    (REPORTS_DIR / "performance_status.json").write_text(json.dumps(status, indent=2), encoding="utf-8")
+    logger.info("Performance en production : %s", status)
+    return status
 
 
 def check(reference) -> dict:
@@ -95,6 +124,10 @@ def main() -> None:
             logger.warning("Données d'entraînement absentes (%s) : lancer make train", REFERENCE_CSV)
         except Exception:  # noqa: BLE001 — le monitor ne doit jamais s'arrêter
             logger.exception("Analyse de dérive échouée")
+        try:
+            check_performance()
+        except Exception:  # noqa: BLE001
+            logger.exception("Mesure de la performance échouée")
         if args.once:
             return
         time.sleep(CHECK_SECONDS)
