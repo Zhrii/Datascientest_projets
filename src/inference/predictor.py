@@ -145,12 +145,25 @@ def _download_production_text_model() -> Optional[Tuple[Path, Dict[str, Any]]]:
         dst.mkdir(parents=True, exist_ok=True)
         local = mlflow.artifacts.download_artifacts(artifact_uri=version.source, dst_path=str(dst))
         info = {
+            "version": str(version.version),
             "source": f"mlflow-registry:{REGISTERED_TEXT_MODEL}@{PRODUCTION_ALIAS} (v{version.version})",
             "f1_macro": float(version.tags["f1_macro"]) if "f1_macro" in version.tags else None,
         }
         return Path(local), info
     except Exception as exc:  # noqa: BLE001
         logger.warning("Model Registry indisponible, fallback fichiers locaux: %s", exc)
+        return None
+
+
+def production_text_version() -> Optional[str]:
+    """Version du modèle texte marquée "production" dans le Model Registry (None si indisponible)."""
+    if not os.getenv("MLFLOW_TRACKING_URI"):
+        return None
+    try:
+        import mlflow
+
+        return str(mlflow.MlflowClient().get_model_version_by_alias(REGISTERED_TEXT_MODEL, PRODUCTION_ALIAS).version)
+    except Exception:  # noqa: BLE001
         return None
 
 
@@ -170,6 +183,7 @@ class ProductPredictor:
             self.meta[modality]["f1_macro"] = round(f1, 4)
 
         self.text_ready = self.image_ready = self.fusion_ready = False
+        self.text_version: Optional[str] = None
         self._text: Dict[str, Any] = {}
         self._image: Dict[str, Any] = {}
         self._fusion: Dict[str, Any] = {}
@@ -179,7 +193,15 @@ class ProductPredictor:
         self._load_image()
         self._load_fusion()
 
+    def reload_text(self) -> None:
+        """Recharge seulement le modèle texte (nouvelle version promue), sans CLIP / ResNet."""
+        self._errors.pop("text", None)
+        self._load_text()
+
     def _load_text(self) -> None:
+        """Charge le modèle texte dans un dict séparé puis le remplace d'un coup :
+        une prédiction en cours ne voit jamais un modèle à moitié chargé."""
+        text: Dict[str, Any] = {}
         try:
             from src.modeling.vectorization import TFIDFVectorizer
             from src.modeling.baseline_models import BaselineModels
@@ -188,9 +210,10 @@ class ProductPredictor:
             registry = _download_production_text_model()
             if registry is not None:
                 local_dir, info = registry
-                self._text["vectorizer"] = TFIDFVectorizer.load(local_dir / "tfidf_vectorizer.pkl")
-                self._text["model"] = BaselineModels.load_model(local_dir / "svm_text_model.pkl")
-                self._text["encoder"] = _load_pickle(local_dir / "label_encoder.pkl")
+                text["vectorizer"] = TFIDFVectorizer.load(local_dir / "tfidf_vectorizer.pkl")
+                text["model"] = BaselineModels.load_model(local_dir / "svm_text_model.pkl")
+                text["encoder"] = _load_pickle(local_dir / "label_encoder.pkl")
+                self._text, self.text_version = text, info["version"]
                 self.meta["text"]["source"] = info["source"]
                 if info["f1_macro"] is not None:
                     self.meta["text"]["f1_macro"] = round(info["f1_macro"], 4)
@@ -210,10 +233,11 @@ class ProductPredictor:
                     "Lancez: .\\make.ps1 train"
                 )
                 return
-            self._text["vectorizer"] = TFIDFVectorizer.load(self.paths["vectorizer"])
-            self._text["model"] = BaselineModels.load_model(self.paths["model_text"])
+            text["vectorizer"] = TFIDFVectorizer.load(self.paths["vectorizer"])
+            text["model"] = BaselineModels.load_model(self.paths["model_text"])
             encoder_path = self.paths["label_encoder"]
-            self._text["encoder"] = _load_pickle(encoder_path) if encoder_path.exists() else None
+            text["encoder"] = _load_pickle(encoder_path) if encoder_path.exists() else None
+            self._text = text
             self.text_ready = True
             logger.info("Pipeline texte prêt (%s)", self.paths["vectorizer"])
         except Exception as exc:  # noqa: BLE001
@@ -281,12 +305,9 @@ class ProductPredictor:
     @staticmethod
     def _preprocess_text(text: str) -> str:
         try:
-            from src.preprocessing.pipeline import PreprocessingPipeline
+            from src.preprocessing.serving import clean_product_text
 
-            pipe = PreprocessingPipeline(combine_text=True, create_features=False)
-            tmp = pd.DataFrame({"designation": [text], "description": [""]})
-            tmp = pipe.fit_transform(tmp)
-            return tmp["text_combined"].iloc[0]
+            return clean_product_text(text)
         except Exception:  # noqa: BLE001
             return text.strip()
 

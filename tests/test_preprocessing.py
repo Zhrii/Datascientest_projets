@@ -26,3 +26,13 @@ def test_text_is_lowercased_and_combined():
 def test_missing_description_keeps_designation():
     text = run("Coussin velours", None)
     assert "coussin velours" in text
+
+
+def test_api_text_is_cleaned_like_training():
+    """L'API reçoit un seul champ texte (souvent avec du HTML) : il doit être nettoyé
+    comme la description à l'entraînement, sinon le modèle voit des balises inconnues."""
+    from src.preprocessing.serving import clean_product_text
+
+    text = clean_product_text("Chaise <b>scandinave</b> pieds en h&ecirc;tre &#233;l&#233;gante")
+    assert "<" not in text and "&" not in text and "#" not in text
+    assert "hêtre" in text and "élégante" in text

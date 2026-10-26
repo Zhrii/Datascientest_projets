@@ -1,7 +1,9 @@
-"""Tests de l'API : routes publiques / protégées, validation, limite de requêtes.
+"""Tests de l'API : routes publiques / protégées, rôles, validation, limite de requêtes.
 
 Un faux prédicteur remplace les vrais modèles (pas de torch / CLIP à charger).
 """
+
+import asyncio
 
 import pytest
 from fastapi.testclient import TestClient
@@ -9,7 +11,8 @@ from fastapi.testclient import TestClient
 import api.main as api_main
 from api.security import predict_limiter, retrain_limiter
 
-AUTH = ("test", "secret")
+AUTH = ("test", "secret")    # rôle admin
+USER = ("alice", "pw")       # rôle user
 
 
 class FakePredictor:
@@ -75,6 +78,28 @@ def test_auth_failures_are_counted(client):
     assert AUTH_FAILURES._value.get() == before + 2
 
 
+def test_user_can_predict(client):
+    r = client.post("/predict", data={"text": "chaise"}, auth=USER)
+    assert r.status_code == 200
+    assert r.headers["X-API-Instance"]
+
+
+@pytest.mark.parametrize("method,path", [("POST", "/retrain"), ("GET", "/model/info")])
+def test_user_cannot_use_admin_routes(client, method, path):
+    r = client.request(method, path, auth=USER)
+    assert r.status_code == 403
+
+
+def test_predictions_are_logged_for_drift(client):
+    from src import state
+
+    before = len(state.recent_predictions())
+    client.post("/predict", data={"text": "Coussin velours"}, auth=USER)
+    logged = state.recent_predictions()
+    assert len(logged) == before + 1
+    assert logged[-1]["text"] == "Coussin velours" and logged[-1]["prdtypecode"] == 1560
+
+
 def test_predict_text(client):
     r = client.post("/predict", data={"text": "Chaise scandinave en bois"}, auth=AUTH)
     assert r.status_code == 200
@@ -102,8 +127,25 @@ def test_model_info_with_auth(client):
 
 
 def test_rate_limit_returns_429(client, monkeypatch):
-    monkeypatch.setattr(predict_limiter, "max_calls", 3)
-    codes = [client.post("/predict", data={"text": "chaise"}, auth=AUTH).status_code for _ in range(5)]
+    monkeypatch.setitem(predict_limiter.limits, "user", (3, 60))
+    codes = [client.post("/predict", data={"text": "chaise"}, auth=USER).status_code for _ in range(5)]
     assert codes == [200, 200, 200, 429, 429]
-    r = client.post("/predict", data={"text": "chaise"}, auth=AUTH)
+    r = client.post("/predict", data={"text": "chaise"}, auth=USER)
     assert int(r.headers["Retry-After"]) > 0
+
+
+def test_admin_has_a_higher_limit(client, monkeypatch):
+    monkeypatch.setitem(predict_limiter.limits, "user", (3, 60))
+    codes = {client.post("/predict", data={"text": "chaise"}, auth=AUTH).status_code for _ in range(5)}
+    assert codes == {200}
+
+
+def test_only_one_retrain_at_a_time(client, monkeypatch):
+    from src import state
+
+    monkeypatch.setattr(api_main, "_run_retrain", lambda: asyncio.sleep(0))
+    assert state.acquire_retrain_lock("autre-replique")   # un retrain tourne déjà ailleurs
+    try:
+        assert client.post("/retrain", auth=AUTH).status_code == 409
+    finally:
+        state.release_retrain_lock()

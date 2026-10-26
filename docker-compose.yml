@@ -2,28 +2,32 @@
 # Stack MLOps Rakuten — calquée sur le schéma "Architecture Overview"
 #
 #   Inference Layer
-#     api        : prédictions texte / image / fusion  -> http://localhost:8000/docs
-#     streamlit  : interface de démo (appelle l'API)   -> http://localhost:8501
+#     api-gateway : nginx, répartit la charge sur les répliques -> http://localhost:8000/docs
+#     api         : FastAPI texte / image / fusion, API_REPLICAS répliques (défaut 2)
+#     redis       : état partagé des répliques (limites, verrou /retrain, journal des prédictions)
+#     streamlit   : interface de démo (appelle l'API)          -> http://localhost:8501
 #   Pipeline Execution
-#     train      : Pipeline Runner ZenML (profil "jobs")
-#                  preprocess_data -> train_model -> promote_model
+#     train       : Pipeline Runner ZenML (profil "jobs")
+#                   collect -> validate -> preprocess -> train -> promote
 #   ZenML Platform
-#     zenml      : suivi des pipelines                 -> http://localhost:8888
+#     zenml       : suivi des pipelines                        -> http://localhost:8888
 #   Storage Layer
-#     mysql      : métadonnées ZenML
-#     minio      : artefacts S3 (ZenML + MLflow)       -> http://localhost:9001
-#     mlflow     : expériences + Model Registry        -> http://localhost:5000
+#     mysql       : métadonnées ZenML
+#     minio       : S3 — artefacts ZenML, MLflow, données DVC  -> http://localhost:9001
+#     mlflow      : expériences + Model Registry               -> http://localhost:5000
 #   Automatisation
-#     scheduler  : déclenche /retrain tout seul (modèle trop vieux, +10 % de données)
+#     scheduler   : déclenche /retrain tout seul (modèle trop vieux, +10 % de données)
 #   Monitoring
-#     prometheus : métriques de l'API + règles d'alerte -> http://localhost:9092
-#     grafana    : tableaux de bord + alertes actives   -> http://localhost:3002
+#     drift-monitor : dérive des données (Evidently)           -> reports/drift_report.html
+#     prometheus  : métriques + règles d'alerte                -> http://localhost:9092
+#     grafana     : tableaux de bord + alertes actives         -> http://localhost:3002
 #
 #   docker compose up -d --build
 #   docker compose run --rm train          (= make train)
 #
-# Identifiants de l'API (HTTP Basic) : API_USERNAME / API_PASSWORD
-# (admin / rakuten par défaut, à changer via un fichier .env)
+# Comptes de l'API (HTTP Basic) — à changer via un fichier .env :
+#   admin / ${ADMIN_PASSWORD:-rakuten}  rôle admin : /predict, /model/info, /retrain
+#   demo  / ${DEMO_PASSWORD:-demo}      rôle user  : /predict
 # =============================================================================
 
 x-s3: &s3-env
@@ -31,9 +35,14 @@ x-s3: &s3-env
   AWS_SECRET_ACCESS_KEY: minioadmin
   MLFLOW_S3_ENDPOINT_URL: http://minio:9000
 
-x-api-credentials: &api-credentials
-  API_USERNAME: ${API_USERNAME:-admin}
-  API_PASSWORD: ${API_PASSWORD:-rakuten}
+# compte "user" (prédictions) et compte "admin" (réentraînement) des clients de l'API
+x-api-user: &api-user
+  API_USERNAME: demo
+  API_PASSWORD: ${DEMO_PASSWORD:-demo}
+
+x-api-admin: &api-admin
+  API_ADMIN_USERNAME: admin
+  API_ADMIN_PASSWORD: ${ADMIN_PASSWORD:-rakuten}
 
 x-zenml-client: &zenml-client-env
   ZENML_STORE_URL: http://zenml:8080
@@ -45,22 +54,43 @@ x-zenml-client: &zenml-client-env
 
 services:
   # ---- Inference Layer ----
+  api-gateway:
+    image: nginx:1.28.0-alpine
+    container_name: rakuten-api-gateway
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      # 127.0.0.1 et non localhost : dans le container, localhost = ::1 (IPv6), où nginx n'écoute pas
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8000/nginx-health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
   api:
     build:
       context: .
       dockerfile: Dockerfile.api
     image: rakuten-api:latest
-    container_name: rakuten-api
-    ports:
-      - "8000:8000"
+    deploy:
+      replicas: ${API_REPLICAS:-2}    # scalabilité : plusieurs répliques derrière nginx
     environment:
-      <<: [*s3-env, *zenml-client-env, *api-credentials]
+      <<: [*s3-env, *zenml-client-env]
+      API_USERS: admin:${ADMIN_PASSWORD:-rakuten}:admin,demo:${DEMO_PASSWORD:-demo}:user
+      REDIS_URL: redis://redis:6379/0
       MODELS_DIR: /app/models
       DATA_BRUT_DIR: /app/data_brut
       MLFLOW_TRACKING_URI: http://mlflow:5000
       HF_HOME: /app/.cache/huggingface
       PREDICT_RATE_LIMIT: ${PREDICT_RATE_LIMIT:-30/minute}
+      PREDICT_RATE_LIMIT_ADMIN: ${PREDICT_RATE_LIMIT_ADMIN:-600/minute}
       RETRAIN_RATE_LIMIT: ${RETRAIN_RATE_LIMIT:-2/hour}
+      MODEL_REFRESH_SECONDS: ${MODEL_REFRESH_SECONDS:-60}
     volumes:
       # écriture nécessaire pour POST /retrain (candidat + promotion)
       - ./models:/app/models
@@ -71,6 +101,8 @@ services:
     depends_on:
       mlflow:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -79,6 +111,16 @@ services:
       retries: 5
       start_period: 180s
 
+  redis:
+    image: redis:7.4.2-alpine
+    container_name: rakuten-redis
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
   streamlit:
     image: rakuten-api:latest
     container_name: rakuten-streamlit
@@ -86,14 +128,16 @@ services:
     ports:
       - "8501:8501"
     environment:
-      <<: *api-credentials
-      API_URL: http://api:8000
+      <<: [*api-user, *api-admin]
+      API_URL: http://api-gateway:8000
       MODELS_DIR: /app/models
+      REPORTS_DIR: /app/reports
     volumes:
       - ./models:/app/models:ro
       - ./images:/app/images:ro
+      - ./reports:/app/reports:ro
     depends_on:
-      api:
+      api-gateway:
         condition: service_healthy
     restart: unless-stopped
 
@@ -108,7 +152,7 @@ services:
       <<: [*s3-env, *zenml-client-env]
       MLFLOW_TRACKING_URI: http://mlflow:5000
     volumes:
-      - "./data brut:/app/data_brut:ro"   # données de départ (lecture seule)
+      - "./data brut:/app/data_brut:ro"   # données de départ (lecture seule, versionnées par DVC)
       - ./data:/app/data
       - ./models:/app/models
     depends_on:
@@ -125,8 +169,9 @@ services:
     container_name: rakuten-scheduler
     command: ["python", "pipelines/scheduler.py"]
     environment:
-      <<: *api-credentials
-      API_URL: http://api:8000
+      API_URL: http://api-gateway:8000
+      API_USERNAME: admin                       # /retrain demande le rôle admin
+      API_PASSWORD: ${ADMIN_PASSWORD:-rakuten}
       DATA_BRUT_DIR: /app/data_brut
       MODELS_DIR: /app/models
       CHECK_INTERVAL_SECONDS: ${CHECK_INTERVAL_SECONDS:-3600}
@@ -136,7 +181,27 @@ services:
       - "./data brut:/app/data_brut:ro"
       - ./models:/app/models:ro
     depends_on:
-      api:
+      api-gateway:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ---- Surveillance de la dérive des données ----
+  drift-monitor:
+    image: rakuten-training:latest
+    container_name: rakuten-drift-monitor
+    command: ["python", "pipelines/drift_monitor.py"]
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      DRIFT_REFERENCE_CSV: /app/data/processed/processed_data.csv
+      REPORTS_DIR: /app/reports
+      DRIFT_CHECK_SECONDS: ${DRIFT_CHECK_SECONDS:-120}
+      DRIFT_WINDOW: ${DRIFT_WINDOW:-300}
+      DRIFT_MIN_SAMPLES: ${DRIFT_MIN_SAMPLES:-200}
+    volumes:
+      - ./data:/app/data:ro
+      - ./reports:/app/reports
+    depends_on:
+      redis:
         condition: service_healthy
     restart: unless-stopped
 
@@ -178,8 +243,8 @@ services:
       test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uzenml", "-pzenml"]
       interval: 10s
       timeout: 5s
-      retries: 10
-      start_period: 40s
+      retries: 20
+      start_period: 60s
     restart: unless-stopped
 
   minio:
@@ -187,7 +252,7 @@ services:
     container_name: rakuten-minio
     command: server /data --console-address ":9001"
     ports:
-      - "9000:9000"
+      - "9000:9000"   # aussi utilisé par DVC depuis le poste (dvc push / pull)
       - "9001:9001"
     environment:
       MINIO_ROOT_USER: minioadmin
@@ -202,7 +267,7 @@ services:
       start_period: 10s
     restart: unless-stopped
 
-  # crée les buckets "mlflow" et "zenml" au démarrage
+  # crée les buckets "mlflow", "zenml" et "dvc" au démarrage
   minio-init:
     image: minio/mc:RELEASE.2024-07-31T15-58-33Z
     container_name: rakuten-minio-init
@@ -213,7 +278,8 @@ services:
       /bin/sh -c "
       mc alias set local http://minio:9000 minioadmin minioadmin &&
       mc mb -p local/mlflow &&
-      mc mb -p local/zenml
+      mc mb -p local/zenml &&
+      mc mb -p local/dvc
       "
 
   mlflow:
@@ -253,6 +319,7 @@ services:
       - prometheus_data:/prometheus
     depends_on:
       - api
+      - drift-monitor
     restart: unless-stopped
 
   grafana:

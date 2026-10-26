@@ -21,6 +21,8 @@ from src.inference.api_client import (
     burst_predict,
     predict_via_api,
     probe_without_auth,
+    retrain_as_user,
+    send_drift_traffic,
     trigger_retrain,
 )
 
@@ -354,49 +356,110 @@ elif page == "8. MLOps / API":
 
     | Composant | Port | Rôle |
     |-----------|------|------|
-    | FastAPI | 8000 | `/predict` 🔒, `/model/info` 🔒, `/retrain` 🔒, `/health`, `/metrics` |
+    | nginx (`api-gateway`) | 8000 | Répartit la charge sur les répliques de l'API |
+    | FastAPI (×2) | — | `/predict` 🔒, `/model/info` 🔒👑, `/retrain` 🔒👑, `/health`, `/metrics` |
+    | Redis | — | État partagé des répliques (limites, verrou, journal des prédictions) |
     | Streamlit | 8501 | UI (cette app) |
-    | Pipeline Runner (`train`) | — | ZenML : preprocess_data → train_model → promote_model |
+    | Pipeline Runner (`train`) | — | ZenML : collect → validate → preprocess → train → promote |
     | ZenML | 8888 | Suivi des pipelines (métadonnées dans MySQL) |
-    | MinIO | 9001 | Artefacts S3 (ZenML + MLflow) |
+    | MinIO | 9001 | S3 : artefacts ZenML, MLflow et données versionnées par DVC |
     | MLflow | 5000 | Expériences + Model Registry (alias `production`) |
     | Scheduler | — | Déclenche `/retrain` tout seul (modèle trop vieux / +10 % de données) |
-    | Prometheus | 9092 | Scraping métriques + règles d'alerte |
+    | Drift monitor | — | Dérive des données en production (Evidently) |
+    | Prometheus | 9092 | Métriques + règles d'alerte |
     | Grafana | 3002 | Dashboards + alertes actives |
+
+    🔒 login / mot de passe · 👑 rôle admin
     """
     )
+    st.code(".\\make.ps1 up\n.\\make.ps1 train\n.\\make.ps1 down", language="powershell")
 
-    st.subheader("Sécurité de l'API")
+    # ---------------------------------------------------------------- sécurité
+    st.subheader("1. Sécurité de l'API")
     st.markdown(
-        "- 🔒 Login / mot de passe (HTTP Basic) sur `/predict`, `/model/info`, `/retrain`\n"
-        "- ⏱️ Limite de requêtes : 30 prédictions / minute et 2 réentraînements / heure par utilisateur "
-        "(au-delà : erreur **429**)\n"
-        "- 📈 Refus comptés dans Prometheus (`auth_failures_total`, `rate_limited_total`) → alertes Grafana"
+        "- 🔒 **Authentification** (HTTP Basic) : compte `demo` (rôle *user*) ou `admin` (rôle *admin*)\n"
+        "- 👑 **Autorisation** : seul un *admin* peut réentraîner ou lire `/model/info` (sinon **403**)\n"
+        "- ⏱️ **Limite de requêtes** : 30 prédictions / minute pour un *user* (au-delà : **429**)\n"
+        "- 📈 Chaque refus est compté dans Prometheus → alertes Grafana"
     )
-    col_a, col_b = st.columns(2)
+    col_a, col_b, col_c = st.columns(3)
     with col_a:
-        if st.button("Appeler /predict sans mot de passe"):
+        if st.button("/predict sans mot de passe"):
             try:
-                st.info(f"Réponse de l'API : **{probe_without_auth()}** (401 = accès refusé)")
+                st.info(f"Réponse : **{probe_without_auth()}** (401 = non authentifié)")
             except requests.RequestException as e:
                 st.error(str(e))
     with col_b:
-        if st.button("Envoyer 40 prédictions d'affilée"):
+        if st.button("/retrain avec le compte user"):
+            try:
+                st.info(f"Réponse : **{retrain_as_user()}** (403 = rôle admin requis)")
+            except requests.RequestException as e:
+                st.error(str(e))
+    with col_c:
+        if st.button("40 prédictions d'affilée"):
             with st.spinner("Rafale en cours..."):
                 try:
-                    codes = burst_predict(40)
-                    st.info(f"Codes HTTP reçus : {codes} (200 = OK, 429 = limite atteinte)")
+                    burst = burst_predict(40)
+                    st.info(f"Codes HTTP : {burst['codes']} (200 = OK, 429 = limite)")
+                    st.session_state["burst_instances"] = burst["instances"]
                 except requests.RequestException as e:
                     st.error(str(e))
-    st.code(".\\make.ps1 up\n.\\make.ps1 train\n.\\make.ps1 down", language="powershell")
 
-    if st.button("Déclencher /retrain via API"):
+    # ---------------------------------------------------------------- scalabilité
+    st.subheader("2. Scalabilité")
+    st.markdown(
+        "Deux répliques de l'API tournent derrière **nginx**. Redis partage leur état : la limite de requêtes "
+        "est la même quelle que soit la réplique, un seul réentraînement à la fois, et chaque réplique recharge "
+        "seule le nouveau modèle *production* du Model Registry."
+    )
+    if st.session_state.get("burst_instances"):
+        st.write("Répartition de la dernière rafale entre les répliques :")
+        st.bar_chart(st.session_state["burst_instances"])
+    else:
+        st.caption("Lancez la rafale ci-dessus pour voir la répartition entre les répliques.")
+
+    # ---------------------------------------------------------------- données
+    st.subheader("3. Qualité et dérive des données")
+    st.markdown(
+        "- ✅ **Validation** : le pipeline s'arrête si les données sont cassées (colonnes, 27 classes, doublons...)\n"
+        "- 📦 **Versioning** : les CSV sont versionnés avec **DVC** (stockage MinIO) ; chaque run MLflow "
+        "garde l'empreinte des données utilisées\n"
+        "- 📉 **Dérive** : le drift-monitor compare les derniers produits reçus aux données d'entraînement "
+        "(Evidently) toutes les 2 minutes"
+    )
+    reports_dir = Path(os.getenv("REPORTS_DIR", "reports"))
+    status_file = reports_dir / "drift_status.json"
+    if status_file.exists():
+        import json
+
+        status = json.loads(status_file.read_text(encoding="utf-8"))
+        if status["status"] == "waiting":
+            st.info(f"Dérive : {status['message']}.")
+        else:
+            label = "🔴 Dérive détectée" if status["drift_detected"] else "🟢 Pas de dérive"
+            st.metric(label, f"{status['drift_share']:.0%} des variables",
+                      help=f"{status['n_current']} prédictions comparées à {status['n_reference']} produits d'entraînement")
+    if st.button("Simuler une dérive (250 produits inhabituels)"):
+        with st.spinner("Envoi de produits très différents des données d'entraînement..."):
+            try:
+                st.info(f"Codes HTTP : {send_drift_traffic(250)} — résultat à la prochaine analyse (≤ 2 min)")
+            except requests.RequestException as e:
+                st.error(str(e))
+    report = reports_dir / "drift_report.html"
+    if report.exists():
+        with st.expander("Rapport Evidently complet"):
+            import streamlit.components.v1 as components
+
+            components.html(report.read_text(encoding="utf-8"), height=900, scrolling=True)
+
+    # ---------------------------------------------------------------- réentraînement
+    st.subheader("4. Réentraînement")
+    if st.button("Déclencher /retrain (compte admin)"):
         if not api_available():
-            st.error("API offline. Lancez `.\\make.ps1 api` d'abord.")
+            st.error("API offline. Lancez `.\\make.ps1 up` d'abord.")
         else:
             try:
-                resp = trigger_retrain()
-                st.success(resp)
+                st.success(trigger_retrain())
             except Exception as e:  # noqa: BLE001
                 st.error(str(e))
 

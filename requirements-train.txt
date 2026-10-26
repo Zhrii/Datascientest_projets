@@ -1,5 +1,5 @@
 # Image "training" / "promote" : modèle texte seulement (léger, sans torch)
-pandas>=2.0.0
+pandas>=2.0.0,<3   # evidently 0.7 incompatible avec pandas 3
 numpy>=1.24.0
 scikit-learn>=1.3.0
 beautifulsoup4>=4.12.0
@@ -17,3 +17,8 @@ s3fs>2022.3.0
 boto3
 aws-profile-manager
 pyarrow
+
+# drift-monitor (même image) : Evidently + métriques Prometheus + lecture du journal Redis
+evidently==0.7.23
+prometheus-client>=0.20.0
+redis>=5.0

@@ -4,13 +4,25 @@ groups:
   - name: rakuten-api
     rules:
       - alert: ApiDown
-        expr: up{job="rakuten-api"} == 0
+        expr: sum(up{job="rakuten-api"}) == 0 or absent(up{job="rakuten-api"})
         for: 1m
         labels:
           severity: critical
         annotations:
-          summary: "L'API d'inférence ne répond plus"
-          description: "Prometheus n'arrive plus à lire /metrics depuis 1 minute."
+          summary: "Plus aucune réplique de l'API ne répond"
+          description: "Prometheus n'arrive plus à lire /metrics sur aucune réplique depuis 1 minute."
+
+      # une réplique arrêtée disparaît du DNS de Docker (et donc des cibles) :
+      # on compte les répliques présentes au lieu de chercher up == 0
+      # (2 = API_REPLICAS de docker-compose.yml)
+      - alert: ApiReplicaDown
+        expr: count(up{job="rakuten-api"} == 1) < 2
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Une réplique de l'API manque ({{ $value }} en service sur 2)"
+          description: "nginx envoie le trafic sur les répliques restantes ; capacité réduite."
 
       - alert: ModelNotLoaded
         expr: model_ready == 0
@@ -49,6 +61,14 @@ groups:
           summary: "Beaucoup de requêtes bloquées par la limite"
           description: "{{ $value | printf \"%.0f\" }} requêtes refusées (429) en 5 minutes : usage anormal ou client mal configuré."
 
+      - alert: ForbiddenAccess
+        expr: sum(increase(forbidden_total[5m])) > 5
+        labels:
+          severity: warning
+        annotations:
+          summary: "Accès refusés faute de droits (403)"
+          description: "{{ $value | printf \"%.0f\" }} appels à une route admin par un compte user en 5 minutes."
+
       - alert: AuthFailures
         expr: sum(increase(auth_failures_total[5m])) > 5
         labels:
@@ -75,3 +95,22 @@ groups:
         annotations:
           summary: "Modèle texte entraîné il y a plus de 30 jours"
           description: "Âge du modèle : {{ $value | printf \"%.0f\" }} jours. Le scheduler devrait relancer un entraînement."
+
+  - name: rakuten-data
+    rules:
+      - alert: DataDrift
+        expr: data_drift_detected == 1
+        labels:
+          severity: warning
+        annotations:
+          summary: "Dérive des données en production"
+          description: "{{ with query \"data_drift_share\" }}{{ . | first | value | humanizePercentage }}{{ end }} des variables surveillées ont dérivé (rapport Evidently : reports/drift_report.html)."
+
+      - alert: DriftMonitorDown
+        expr: up{job="rakuten-drift"} == 0 or (time() - data_drift_last_check_timestamp_seconds) > 900
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "La détection de dérive ne tourne plus"
+          description: "Aucune analyse de dérive depuis plus de 15 minutes."

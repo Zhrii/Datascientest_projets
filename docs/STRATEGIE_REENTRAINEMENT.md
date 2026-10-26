@@ -36,11 +36,12 @@ models/                  <- modèle EN PRODUCTION (lu par l'API)
 
 Les trois étapes sont celles du pipeline ZenML `rakuten_training_pipeline`, lancé par `.\make.ps1 train` (ou `POST /retrain` sur l'API) :
 
-1. **Entraînement** (étapes `preprocess_data` puis `train_model`) : le nouveau modèle est écrit dans `models/candidate/`, le run est noté dans MLflow et le modèle devient une nouvelle version de `rakuten-text-svm` dans le Model Registry.
+0. **Contrôle des données** (étapes `collect_data` puis `validate_data`) : colonnes, 27 catégories, doublons, désignations vides. Si un contrôle échoue, le pipeline s'arrête : on n'entraîne pas sur des données cassées. La version des données (empreintes DVC) est relevée.
+1. **Entraînement** (étapes `preprocess_data` puis `train_model`) : le nouveau modèle est écrit dans `models/candidate/`, le run est noté dans MLflow avec la version des données et le rapport qualité, et le modèle devient une nouvelle version de `rakuten-text-svm` dans le Model Registry.
 2. **Promotion** (étape `promote_model`) : on compare le F1-macro du candidat avec celui de la production.
    - Candidat au moins aussi bon : l'ancien modèle est archivé, le candidat prend sa place, sa version reçoit l'alias `production` dans le Model Registry, et le run MLflow reçoit le tag `promoted_to_production=true`.
    - Candidat moins bon : refusé, la production ne bouge pas, le tag est `false`.
-3. **Mise en service** : l'API charge `rakuten-text-svm@production` depuis le Model Registry (`make train` redémarre l'API ; `POST /retrain` recharge le modèle tout seul).
+3. **Mise en service** : chaque réplique de l'API vérifie toutes les minutes l'alias `production` du Model Registry et charge la nouvelle version toute seule, sans redémarrage ni coupure.
 
 Les protections :
 - le candidat doit être complet (3 fichiers + `metrics.json`, écrit en dernier), sinon la promotion s'arrête ;
@@ -50,20 +51,21 @@ Les protections :
 
 ## 4. Revenir en arrière (rollback)
 
-Chaque promotion garde l'ancien modèle dans `models/archive/<date>/`. Pour revenir à une version précédente, on recopie ses fichiers dans `models/` puis on redémarre l'API :
+**Méthode principale : déplacer l'alias dans MLflow.** Onglet *Models* → `rakuten-text-svm` → poser l'alias `production` sur la version précédente. En moins d'une minute, toutes les répliques de l'API la chargent (aucun redémarrage).
+
+**Copie locale.** Chaque promotion garde aussi l'ancien modèle dans `models/archive/<date>/`. Après un rollback, recopier l'archive correspondante dans `models/` : c'est la référence à laquelle `promote_model` compare le prochain candidat, et le modèle que l'API utilise si MLflow est indisponible.
 
 ```powershell
 dir models\archive
 copy models\archive\<date>\*.pkl models\
 copy models\archive\<date>\metrics.json models\
-docker compose restart api
 ```
 
-MLflow garde aussi les 3 fichiers de chaque entraînement (onglet Artifacts, stockés dans MinIO). Autre façon de revenir en arrière : dans MLflow (onglet Models), déplacer l'alias `production` sur une version précédente, puis redémarrer l'API.
+MLflow garde aussi les 3 fichiers de chaque entraînement (onglet Artifacts, stockés dans MinIO), et la version des données utilisée : `git checkout` du commit correspondant puis `.\make.ps1 data-pull` redonne exactement ces données.
 
 ## 5. Limites (à dire honnêtement dans le rapport)
 
 - **Les deux modèles ne sont pas testés sur exactement les mêmes produits.** Chaque entraînement tire ses 20 % de test au hasard (avec une graine fixe) dans les données du moment. Si les données changent, la comparaison n'est pas parfaite. Amélioration possible : un jeu de test fixe, jamais utilisé pour entraîner.
-- **Pas de détection automatique d'une baisse de qualité.** Le F1 ne se calcule que sur des produits dont on connaît la vraie catégorie. Piste pour la Phase 4 : surveiller la répartition des catégories prédites et la confiance du modèle avec Prometheus et Grafana.
+- **Le F1 en production n'est pas mesuré directement.** Il ne se calcule que sur des produits dont on connaît la vraie catégorie. À la place, on surveille un signe avant-coureur : la **dérive des données** (Evidently, container `drift-monitor`) compare les produits reçus aux données d'entraînement — forme des textes et répartition des catégories prédites — et déclenche l'alerte `DataDrift`. Une dérive n'est pas réentraînée automatiquement : sans nouvelles données étiquetées, réentraîner ne changerait rien ; elle signale qu'il faut en collecter.
 - **Le déclencheur « F1 < 0,75 sur des produits récents » n'est pas automatisé.** Il faudrait des produits récents dont on connaît la vraie catégorie (retours des modérateurs). Le scheduler ne gère que l'âge du modèle et la quantité de données ; l'alerte `ModelF1Low` porte sur le F1 mesuré à l'entraînement.
 - **Un seul critère de décision (le F1-macro).** On pourrait aussi regarder le score par classe, pour ne pas promouvoir un modèle qui s'effondre sur une petite classe.

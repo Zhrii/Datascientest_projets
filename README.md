@@ -21,7 +21,9 @@ Dans un contexte e-commerce, ces outils permettent de :
 
 Les données sont dans le dossier `data brut/` :
 
-> ⚠️ Les fichiers de données (`*.csv`, images) ne sont **pas versionnés** dans Git. Après clonage, placer les fichiers dans `data brut/` selon les instructions de `data brut/README.md`.
+> ⚠️ Les CSV de `data brut/` sont **versionnés avec DVC**, pas avec Git : Git ne contient que les fichiers `*.csv.dvc` (empreintes), les CSV sont stockés dans MinIO. Après clonage : `.\make.ps1 up` puis `.\make.ps1 data-pull`. Les images ne sont pas versionnées (voir `data brut/README.md`).
+>
+> **Équipe — après avoir récupéré la branche MLOps** : les CSV ont été retirés de Git, `git pull` les supprime de votre dossier `data brut/`. Le stockage DVC (MinIO) étant local à chaque poste, recopiez-les depuis votre sauvegarde ou depuis l'archive DataScientest, puis lancez `python -m dvc status "data brut/X_train_update.csv.dvc"` pour vérifier qu'ils correspondent à la version attendue.
 
 ### Fichiers principaux
 
@@ -40,7 +42,7 @@ Les données sont dans le dossier `data brut/` :
 
 ```
 Datascientest_projets/
-├── data brut/              # Données brutes (CSV, non versionnées)
+├── data brut/              # Données brutes (CSV versionnés par DVC : *.csv.dvc dans Git)
 ├── data/processed/         # Données nettoyées + images (image_train/)
 ├── notebooks/              # 01–06 texte · 07–11 image · 12 fusion multimodale
 ├── src/                    # Code modulaire
@@ -79,7 +81,8 @@ Voir **[ARCHITECTURE.md](ARCHITECTURE.md)** (stack Docker, sécurité, alertes, 
 ```powershell
 # 1) Docker Desktop doit être démarré (icône baleine verte)
 .\make.ps1 up              # toute la stack
-.\make.ps1 train           # pipeline ZenML → promotion si meilleur → restart API
+.\make.ps1 train           # pipeline ZenML → promotion si meilleur → rechargé à chaud par l'API
+.\make.ps1 data-pull       # récupérer les CSV versionnés par DVC
 .\make.ps1 test            # tests pytest
 .\make.ps1 down            # stop
 ```
@@ -204,7 +207,7 @@ Liste complète : `requirements.txt`.
 ## 🔧 Dépannage
 
 - **ModuleNotFoundError** (ex. `torch`, `pandas`) : vérifier l’environnement activé et le kernel Jupyter, puis `pip install -r requirements.txt`.
-- **Données manquantes** : placer les CSV et, pour le matching, les images selon `data brut/README.md` et la convention des noms dans `data/processed/image_train/`.
+- **Données manquantes** : `.\make.ps1 data-pull` (MinIO doit tourner), ou placer les CSV à la main et, pour le matching, les images selon `data brut/README.md` et la convention des noms dans `data/processed/image_train/`.
 - **Encodage** : le projet suppose UTF-8 ; sous Windows, privilégier PowerShell.
 
 ---

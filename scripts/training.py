@@ -41,7 +41,9 @@ INFO_FILE = "metrics.json"  # lu ensuite par promote_model.py
 REGISTERED_MODEL = "rakuten-text-svm"  # nom dans le Model Registry MLflow
 
 
-def train(input_path, models_dir, use_mlflow):
+def train(input_path, models_dir, use_mlflow, extra_params=None, extra_artifacts=None):
+    """extra_params : ajoutés aux paramètres MLflow (ex. version des données DVC).
+    extra_artifacts : {nom.json: dict} enregistrés dans le run (ex. rapport qualité)."""
     # on lit les données et on enlève les lignes vides
     df = pd.read_csv(input_path).dropna(subset=["text_combined", "prdtypecode"])
 
@@ -100,8 +102,9 @@ def train(input_path, models_dir, use_mlflow):
             "n_train": len(X_train),
             "n_val": len(X_val),
             "n_classes": len(encoder.classes_),
+            **(extra_params or {}),
         }
-        run_id, model_version = log_to_mlflow(params, metrics, models_dir_path)
+        run_id, model_version = log_to_mlflow(params, metrics, models_dir_path, extra_artifacts)
 
     # carte d'identité du modèle, écrite en DERNIER :
     # si elle existe, c'est que tout le reste s'est bien passé
@@ -120,7 +123,7 @@ def train(input_path, models_dir, use_mlflow):
     return metrics
 
 
-def log_to_mlflow(params, metrics, models_dir):
+def log_to_mlflow(params, metrics, models_dir, extra_artifacts=None):
     """Envoie les paramètres, les scores et les fichiers du modèle à MLflow,
     puis enregistre le modèle dans le Model Registry.
     Renvoie (run_id, version du modèle), ou (None, None) si mlflow n'est pas installé."""
@@ -142,6 +145,8 @@ def log_to_mlflow(params, metrics, models_dir):
     with mlflow.start_run() as run:
         mlflow.log_params(params)
         mlflow.log_metrics(metrics)
+        for name, content in (extra_artifacts or {}).items():
+            mlflow.log_dict(content, f"data/{name}")
         for name in ARTIFACT_FILES:
             mlflow.log_artifact(str(models_dir / name), artifact_path="model_artifacts")
         print(f"🎯 Run MLflow enregistré : {run.info.run_id}  ({tracking_uri})")

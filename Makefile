@@ -1,7 +1,7 @@
-.PHONY: help install api streamlit train train-local promote test up down logs health ps
+.PHONY: help install api streamlit train train-local promote test data-push data-pull drift up down logs health ps
 
 help:
-	@echo "make up | down | train | train-local | promote | test | api | streamlit | health | ps"
+	@echo "make up | down | train | train-local | promote | test | data-push | data-pull | drift | api | streamlit | health | ps"
 
 install:
 	pip install -r requirements.txt
@@ -14,9 +14,9 @@ streamlit:
 	streamlit run app.py --server.port 8501
 
 # Pipeline Runner ZenML (Docker) : preprocess_data -> train_model -> promote_model
+# (les répliques de l'API chargent seules le nouveau modèle "production")
 train:
 	docker compose run --rm train
-	docker compose restart api
 
 # sans Docker ni ZenML : collecte -> process -> training (candidat dans models/candidate)
 train-local:
@@ -31,6 +31,17 @@ promote:
 # tests pytest dans l'image de l'API (même chose en CI : .github/workflows/tests.yml)
 test:
 	docker compose run --rm --no-deps api pytest -q
+
+# versioning des données : CSV de "data brut/" <-> MinIO (bucket dvc)
+DVC_FILES = "data brut/X_train_update.csv.dvc" "data brut/Y_train.csv.dvc" "data brut/X_test_update.csv.dvc"
+data-push:
+	python -m dvc push $(DVC_FILES)
+
+data-pull:
+	python -m dvc pull $(DVC_FILES)
+
+drift:
+	docker compose exec drift-monitor python pipelines/drift_monitor.py --once
 
 up:
 	docker compose up -d --build

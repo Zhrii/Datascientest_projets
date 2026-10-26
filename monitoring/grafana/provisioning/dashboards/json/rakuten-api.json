@@ -66,7 +66,7 @@
       "id": 3,
       "targets": [
         {
-          "expr": "model_ready",
+          "expr": "min by (pipeline) (model_ready)",
           "legendFormat": "{{pipeline}}",
           "refId": "A"
         }
@@ -203,6 +203,11 @@
           "expr": "sum by (endpoint) (increase(rate_limited_total[1m]))",
           "legendFormat": "429 limite {{endpoint}}",
           "refId": "B"
+        },
+        {
+          "expr": "sum by (endpoint) (increase(forbidden_total[1m]))",
+          "legendFormat": "403 droits {{endpoint}}",
+          "refId": "C"
         }
       ],
       "fieldConfig": {
@@ -223,7 +228,7 @@
       },
       "targets": [
         {
-          "expr": "model_f1_macro",
+          "expr": "max by (pipeline) (model_f1_macro)",
           "legendFormat": "{{pipeline}}",
           "refId": "A"
         }
@@ -272,7 +277,7 @@
       },
       "targets": [
         {
-          "expr": "(time() - model_trained_timestamp_seconds) / 86400",
+          "expr": "(time() - max(model_trained_timestamp_seconds)) / 86400",
           "legendFormat": "âge",
           "refId": "A"
         }
@@ -308,6 +313,175 @@
         "colorMode": "background",
         "graphMode": "none"
       }
+    },
+    {
+      "title": "Répliques de l'API en service",
+      "type": "stat",
+      "id": 10,
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 0,
+        "y": 28
+      },
+      "targets": [
+        {
+          "expr": "sum(up{job=\"rakuten-api\"})",
+          "legendFormat": "répliques",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "green",
+                "value": 2
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "description": "Répliques FastAPI derrière nginx (docker-compose : API_REPLICAS)"
+    },
+    {
+      "title": "Dérive des données (Evidently)",
+      "type": "stat",
+      "id": 11,
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 8,
+        "y": 28
+      },
+      "targets": [
+        {
+          "expr": "data_drift_share",
+          "legendFormat": "part des variables en dérive",
+          "refId": "A"
+        },
+        {
+          "expr": "data_drift_current_samples",
+          "legendFormat": "prédictions analysées",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "part des variables en dérive"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percentunit"
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "orange",
+                      "value": 0.25
+                    },
+                    {
+                      "color": "red",
+                      "value": 0.5
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "description": "Comparaison des derniers produits reçus aux données d'entraînement (reports/drift_report.html)"
+    },
+    {
+      "title": "Dérive par variable",
+      "type": "table",
+      "id": 12,
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 16,
+        "y": 28
+      },
+      "targets": [
+        {
+          "expr": "data_drift_column_score",
+          "format": "table",
+          "instant": true,
+          "refId": "A"
+        },
+        {
+          "expr": "data_drift_column_drifted",
+          "format": "table",
+          "instant": true,
+          "refId": "B"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "instance": true,
+              "job": true,
+              "project": true,
+              "service": true
+            },
+            "renameByName": {
+              "column": "Variable",
+              "method": "Test",
+              "Value #A": "Score",
+              "Value #B": "Dérive (1/0)"
+            }
+          }
+        }
+      ]
     }
   ],
   "schemaVersion": 39,
@@ -325,5 +499,5 @@
   "timezone": "browser",
   "title": "Rakuten Inference API",
   "uid": "rakuten-api",
-  "version": 2
+  "version": 3
 }

@@ -1,9 +1,12 @@
 """
 Pipeline ZenML d'entraînement (le "Pipeline Runner" du schéma d'architecture).
 
-  1. preprocess_data : collecte + nettoyage texte (scripts/collecte.py, scripts/process.py)
-  2. train_model     : TF-IDF + SVM -> models/candidate, run MLflow, version dans le Model Registry
-  3. promote_model   : candidat >= production ? -> models/ + alias "production" (scripts/promote_model.py)
+  1. collect_data    : CSV bruts -> table fusionnée + version des données (DVC)  (scripts/collecte.py)
+  2. validate_data   : contrôle qualité ; arrête le pipeline si les données sont cassées (scripts/validate_data.py)
+  3. preprocess_data : nettoyage texte (scripts/process.py)
+  4. train_model     : TF-IDF + SVM -> models/candidate, run MLflow (+ version des données
+                       et rapport qualité), version dans le Model Registry
+  5. promote_model   : candidat >= production ? -> models/ + alias "production" (scripts/promote_model.py)
 
 Où vont les choses :
   - ZenML Server (MySQL)  : historique des runs, étapes, statuts
@@ -20,7 +23,7 @@ import os
 import sys
 import tempfile
 from pathlib import Path
-from typing import Annotated, Any, Dict
+from typing import Annotated, Any, Dict, Tuple
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -32,10 +35,12 @@ from zenml.client import Client
 from zenml.enums import StackComponentType
 
 from scripts.collecte import collecter
+from scripts.data_version import data_version
 from scripts.process import process
 from scripts.promote_model import EXIT_PROMOTED, EXIT_REJECTED
 from scripts.promote_model import main as promote_main
 from scripts.training import INFO_FILE, train
+from scripts.validate_data import validate
 
 DATA_BRUT_DIR = os.getenv("DATA_BRUT_DIR", str(ROOT / "data brut"))
 MODELS_DIR = Path(os.getenv("MODELS_DIR", ROOT / "models"))
@@ -49,22 +54,43 @@ ARTIFACT_STORE_NAME = "minio"
 
 # ----------------------------------------------------------------------------- steps
 @step
-def preprocess_data() -> Annotated[pd.DataFrame, "processed_data"]:
-    """Collecte des CSV bruts puis nettoyage texte ; le résultat est stocké dans MinIO."""
+def collect_data() -> Tuple[Annotated[pd.DataFrame, "raw_data"], Annotated[Dict[str, str], "data_version"]]:
+    """Fusionne X_train / Y_train et relève la version des données (empreintes DVC)."""
     collecter(DATA_BRUT_DIR, str(MERGED_CSV))
+    return pd.read_csv(MERGED_CSV), data_version(DATA_BRUT_DIR)
+
+
+@step
+def validate_data(raw_data: pd.DataFrame) -> Annotated[Dict[str, Any], "quality_report"]:
+    """Contrôle qualité : lève une erreur (le pipeline s'arrête) si un contrôle bloquant échoue."""
+    report = validate(raw_data)
+    for warning in report["warnings"]:
+        print(f"⚠️  {warning}")
+    print(f"✅ Données valides : {report['n_rows']:,} produits, {report['n_classes']} catégories")
+    return report
+
+
+@step
+def preprocess_data(raw_data: pd.DataFrame, quality_report: Dict[str, Any]) -> Annotated[pd.DataFrame, "processed_data"]:
+    """Nettoyage texte (n'a lieu que si validate_data est passé) ; le résultat est stocké dans MinIO."""
     process(str(MERGED_CSV), str(PROCESSED_CSV))
     return pd.read_csv(PROCESSED_CSV)
 
 
 @step
-def train_model(processed_data: pd.DataFrame) -> Annotated[Dict[str, Any], "candidate_metrics"]:
+def train_model(
+    processed_data: pd.DataFrame,
+    data_version: Dict[str, str],
+    quality_report: Dict[str, Any],
+) -> Annotated[Dict[str, Any], "candidate_metrics"]:
     """Entraîne un candidat, le trace dans MLflow et l'enregistre dans le Model Registry."""
     import json
 
     with tempfile.TemporaryDirectory() as tmp:
         csv_path = Path(tmp) / "train.csv"
         processed_data.to_csv(csv_path, index=False)
-        train(str(csv_path), str(CANDIDATE_DIR), use_mlflow=True)
+        train(str(csv_path), str(CANDIDATE_DIR), use_mlflow=True,
+              extra_params=data_version, extra_artifacts={"quality_report.json": quality_report})
     return json.loads((CANDIDATE_DIR / INFO_FILE).read_text(encoding="utf-8"))
 
 
@@ -87,8 +113,10 @@ def promote_model(candidate_metrics: Dict[str, Any]) -> Annotated[Dict[str, Any]
 
 @pipeline(enable_cache=False)
 def rakuten_training_pipeline():
-    data = preprocess_data()
-    metrics = train_model(data)
+    raw, version = collect_data()
+    report = validate_data(raw)
+    data = preprocess_data(raw, report)
+    metrics = train_model(data, version, report)
     promote_model(metrics)
 
 

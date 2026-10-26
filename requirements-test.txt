@@ -5,7 +5,7 @@ fastapi>=0.110.0
 python-multipart>=0.0.9
 prometheus-client>=0.20.0
 requests>=2.31.0
-pandas>=2.0.0
+pandas>=2.0.0,<3   # evidently 0.7 incompatible avec pandas 3
 numpy>=1.24.0
 scikit-learn>=1.3.0
 Pillow>=9.0.0
@@ -13,3 +13,6 @@ beautifulsoup4>=4.12.0
 lxml>=4.9.0
 matplotlib>=3.7.0
 seaborn>=0.12.0
+redis>=5.0
+fakeredis>=2.20
+evidently==0.7.23

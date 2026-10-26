@@ -47,6 +47,9 @@ developpement/.env
 # Dossier data brut : tout ignorer sauf le README
 data brut/*
 !data brut/README.md
+# DVC : seuls les petits fichiers .dvc (empreintes) vont dans Git, les CSV vont dans MinIO
+!data brut/*.dvc
+!data brut/.gitignore
 
 # Dossiers de données traitées et images
 data/processed/
@@ -109,6 +112,7 @@ clip_features_cache.npz
 images/
 temp_image.jpg
 
-# Archives et métadonnées de runs (régénérées par les pipelines)
+# Archives, métadonnées de runs et rapports (régénérés par les pipelines)
+reports/
 *.zip
 artifacts/

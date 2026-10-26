@@ -6,10 +6,24 @@ rule_files:
   - /etc/prometheus/alerts.yml
 
 scrape_configs:
+  # chaque réplique de l'API, découverte par le DNS de Docker (service "api")
   - job_name: rakuten-api
     metrics_path: /metrics
+    dns_sd_configs:
+      - names: ["api"]
+        type: A
+        port: 8000
+        refresh_interval: 15s
+    relabel_configs:
+      - target_label: service
+        replacement: inference
+      - target_label: project
+        replacement: rakuten
+
+  # détection de dérive des données (Evidently)
+  - job_name: rakuten-drift
     static_configs:
-      - targets: ["api:8000"]
+      - targets: ["drift-monitor:8001"]
         labels:
-          service: inference
+          service: drift
           project: rakuten

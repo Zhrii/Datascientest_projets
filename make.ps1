@@ -3,7 +3,8 @@ param(
     [Parameter(Position = 0)]
     [ValidateSet(
         "help", "install", "install-mlops", "api", "streamlit", "train", "train-local",
-        "promote", "test", "up", "down", "logs", "health", "ps", "export-fusion"
+        "promote", "test", "up", "down", "logs", "health", "ps", "export-fusion",
+        "data-push", "data-pull", "drift"
     )]
     [string]$Target = "help"
 )
@@ -20,10 +21,13 @@ Targets:
   .\make.ps1 api            FastAPI local :8000
   .\make.ps1 streamlit      Streamlit local :8501
   .\make.ps1 up             docker compose — stack complète du schéma
-  .\make.ps1 train          pipeline ZenML (Docker) : preprocess -> train -> promote
+  .\make.ps1 train          pipeline ZenML (Docker) : collect -> validate -> preprocess -> train -> promote
   .\make.ps1 train-local    sans Docker : collecte -> process -> training (candidat)
   .\make.ps1 promote        sans Docker : met le candidat en production s'il est meilleur
   .\make.ps1 test           tests pytest (dans l'image de l'API)
+  .\make.ps1 data-push      envoie les CSV versionnés par DVC dans MinIO
+  .\make.ps1 data-pull      récupère les CSV depuis MinIO (version du commit courant)
+  .\make.ps1 drift          lance tout de suite une analyse de dérive
   .\make.ps1 export-fusion  entraîne/exporte artefacts fusion (CLIP)
   .\make.ps1 down           stop containers
   .\make.ps1 logs           logs API
@@ -49,7 +53,7 @@ Targets:
     "train" {
         docker compose run --rm train
         if ($LASTEXITCODE -ne 0) { throw "le pipeline a échoué" }
-        docker compose restart api
+        Write-Host "Si le modèle est promu, les répliques de l'API le chargent toutes seules (< 1 min)."
     }
     "train-local" {
         python scripts/collecte.py --data-dir "data brut"
@@ -63,7 +67,7 @@ Targets:
         docker compose up -d --build
         Write-Host ""
         Write-Host "URLs :"
-        Write-Host "  FastAPI     http://localhost:8000/docs"
+        Write-Host "  FastAPI     http://localhost:8000/docs  (via nginx, 2 répliques)"
         Write-Host "  Streamlit   http://localhost:8501"
         Write-Host "  ZenML       http://localhost:8888  (default / zenml)"
         Write-Host "  MLflow      http://localhost:5000"
@@ -71,10 +75,19 @@ Targets:
         Write-Host "  Prometheus  http://localhost:9092"
         Write-Host "  Grafana     http://localhost:3002  (admin / rakuten)"
         Write-Host ""
-        Write-Host "API protégée : login admin / mot de passe rakuten (API_USERNAME / API_PASSWORD)"
+        Write-Host "API protégée : admin / rakuten (rôle admin), demo / demo (rôle user)"
     }
     "test" {
         docker compose run --rm --no-deps api pytest -q
+    }
+    "data-push" {
+        python -m dvc push "data brut/X_train_update.csv.dvc" "data brut/Y_train.csv.dvc" "data brut/X_test_update.csv.dvc"
+    }
+    "data-pull" {
+        python -m dvc pull "data brut/X_train_update.csv.dvc" "data brut/Y_train.csv.dvc" "data brut/X_test_update.csv.dvc"
+    }
+    "drift" {
+        docker compose exec drift-monitor python pipelines/drift_monitor.py --once
     }
     "export-fusion" {
         $env:FUSION_MAX_ROWS = if ($env:FUSION_MAX_ROWS) { $env:FUSION_MAX_ROWS } else { "4000" }
