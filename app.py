@@ -166,6 +166,7 @@ page = st.sidebar.radio(
         "6. Moteur Multimodal",
         "7. Conclusion",
         "8. MLOps / API",
+        "9. Cycle de vie du modèle",
     ],
 )
 
@@ -538,6 +539,12 @@ elif page == "8. MLOps / API":
 
     st.markdown("**Catégories référencées :**")
     st.json(DICT_CATEGORIES)
+
+
+elif page == "9. Cycle de vie du modèle":
+    from src.ui.cycle_vie import render as render_cycle_vie
+
+    render_cycle_vie()
 
 
 # formulaire de retour modérateur sous les assistants de prédiction
