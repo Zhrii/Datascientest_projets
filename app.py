@@ -166,7 +166,7 @@ page = st.sidebar.radio(
         "6. Moteur Multimodal",
         "7. Conclusion",
         "8. MLOps / API",
-        "9. Cycle de vie du modèle",
+        "9. Test du produit final",
     ],
 )
 
@@ -541,7 +541,7 @@ elif page == "8. MLOps / API":
     st.json(DICT_CATEGORIES)
 
 
-elif page == "9. Cycle de vie du modèle":
+elif page == "9. Test du produit final":
     from src.ui.cycle_vie import render as render_cycle_vie
 
     render_cycle_vie()
